@@ -1,10 +1,7 @@
 # Line-to-Color
 
-pix2pixを使って線画着色を行います。
-入力画像サイズは128✕128で、学習データが4900枚で100epochでも着色している様子は見て取れました。
-ただ、自分の計算資源ではこれが限界です....本当はもっと高解像度で学習データ枚数を増やしたいところです。
+## pix2pix  
+Paper -> [here](https://arxiv.org/abs/1611.07004 "here")  
 
-`colorization.py`  
-では、テストデータとして9枚用いています。  
-`line.npy`に入力データである線画、`trim.npy`に教師データである着色された画像をグレースケールで準備しています。  
-フレームワークはChainerです。
+train data -> line drawings, labeled data -> colored image  
+input size: 128×128
