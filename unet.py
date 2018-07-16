@@ -6,45 +6,45 @@ import chainer.links as L
 from chainer import cuda, optimizers, serializers, initializers, Variable, Chain
 
 class Unet(Chain):
-	def __init__(self):
+	def __init__(self, base = 32):
 		super(Unet, self).__init__(
-			conv0 = L.Convolution2D(3,32,3,1,1),
-			conv1 = L.Convolution2D(32,64,4,2,1),
-			conv2 = L.Convolution2D(64,128,4,2,1),
-			conv3 = L.Convolution2D(128,256,4,2,1),
-			conv4 = L.Convolution2D(256,256,4,2,1),
-			conv5 = L.Convolution2D(256,256,4,2,1),
-			conv6 = L.Convolution2D(256,256,4,2,1),
-			conv7 = L.Convolution2D(256,256,4,2,1),
+			conv0 = L.Convolution2D(3,base,3,1,1),
+			conv1 = L.Convolution2D(base,base*2,4,2,1),
+			conv2 = L.Convolution2D(base*2,base*4,4,2,1),
+			conv3 = L.Convolution2D(base*4,base*8,4,2,1),
+			conv4 = L.Convolution2D(base*8,base*8,4,2,1),
+			conv5 = L.Convolution2D(base*8,base*8,4,2,1),
+			conv6 = L.Convolution2D(base*8,base*8,4,2,1),
+			conv7 = L.Convolution2D(base*8,base*8,4,2,1),
 
-			dconv7 = L.Deconvolution2D(256,256,4,2,1),
-			dconv6 = L.Deconvolution2D(512,256,4,2,1),
-			dconv5 = L.Deconvolution2D(512,256,4,2,1),
-			dconv4 = L.Deconvolution2D(512,256,4,2,1),
-			dconv3 = L.Deconvolution2D(512,128,4,2,1),
-			dconv2 = L.Deconvolution2D(256,64,4,2,1),
-			dconv1 = L.Deconvolution2D(128,32,4,2,1),
-			dconv0 = L.Convolution2D(64,3,3,1,1),
+			dconv7 = L.Deconvolution2D(base*8,base*8,4,2,1),
+			dconv6 = L.Deconvolution2D(base*16,base*8,4,2,1),
+			dconv5 = L.Deconvolution2D(base*16,base*8,4,2,1),
+			dconv4 = L.Deconvolution2D(base*16,base*8,4,2,1),
+			dconv3 = L.Deconvolution2D(base*16,base*4,4,2,1),
+			dconv2 = L.Deconvolution2D(base*8,base*2,4,2,1),
+			dconv1 = L.Deconvolution2D(base*4,base,4,2,1),
+			dconv0 = L.Convolution2D(base*2,3,3,1,1),
 
-			bnc0 = L.BatchNormalization(32),
-			bnc1 = L.BatchNormalization(64),
-			bnc2 = L.BatchNormalization(128),
-			bnc3 = L.BatchNormalization(256),
-			bnc4 = L.BatchNormalization(256),
-			bnc5 = L.BatchNormalization(256),
-			bnc6 = L.BatchNormalization(256),
-			bnc7 = L.BatchNormalization(256),
+			bnc0 = L.BatchNormalization(base),
+			bnc1 = L.BatchNormalization(base*2),
+			bnc2 = L.BatchNormalization(base*4),
+			bnc3 = L.BatchNormalization(base*8),
+			bnc4 = L.BatchNormalization(base*8),
+			bnc5 = L.BatchNormalization(base*8),
+			bnc6 = L.BatchNormalization(base*8),
+			bnc7 = L.BatchNormalization(base*8),
 
-			bndc7 = L.BatchNormalization(256),
-			bndc6 = L.BatchNormalization(256),
-			bndc5 = L.BatchNormalization(256),
-			bndc4 = L.BatchNormalization(256),
-			bndc3 = L.BatchNormalization(128),
-			bndc2 = L.BatchNormalization(64),
-			bndc1 = L.BatchNormalization(32)
+			bndc7 = L.BatchNormalization(base*8),
+			bndc6 = L.BatchNormalization(base*8),
+			bndc5 = L.BatchNormalization(base*8),
+			bndc4 = L.BatchNormalization(base*8),
+			bndc3 = L.BatchNormalization(base*4),
+			bndc2 = L.BatchNormalization(base*2),
+			bndc1 = L.BatchNormalization(base)
 		)
 
-	def forward(self,x):
+	def __call__(self,x):
 		enc0 = F.leaky_relu(self.bnc0(self.conv0(x)))
 		enc1 = F.leaky_relu(self.bnc1(self.conv1(enc0)))
 		enc2 = F.leaky_relu(self.bnc2(self.conv2(enc1)))
@@ -74,27 +74,27 @@ class Unet(Chain):
 		return dec0
 
 class Discriminator(Chain):
-	def __init__(self):
+	def __init__(self, base = 32):
 		super(Discriminator,self).__init__(
-			conv1 = L.Convolution2D(3,32,4,2,1),
-			conv2 = L.Convolution2D(32,32,3,1,1),
-			conv3 = L.Convolution2D(32,64,4,2,1),
-			conv4 = L.Convolution2D(64,64,3,1,1),
-			conv5 = L.Convolution2D(64,128,4,2,1),
-			conv6 = L.Convolution2D(128,128,3,1,1),
-			conv7 = L.Convolution2D(128,256,4,2,1),
-			l8 = L.Linear(None,2,initialW = initializers.HeNormal(math.sqrt(0.02*math.sqrt(8*8*256)/2))),
+			conv1 = L.Convolution2D(3,base,4,2,1),
+			conv2 = L.Convolution2D(base,base,3,1,1),
+			conv3 = L.Convolution2D(base,base*2,4,2,1),
+			conv4 = L.Convolution2D(base*2,base*2,3,1,1),
+			conv5 = L.Convolution2D(base*2,base*4,4,2,1),
+			conv6 = L.Convolution2D(base*4,base*4,3,1,1),
+			conv7 = L.Convolution2D(base*4,base*8,4,2,1),
+			l8 = L.Linear(None,2,initialW = initializers.HeNormal(math.sqrt(0.02*math.sqrt(8*8*base*8)/2))),
 
-			bnc1 = L.BatchNormalization(32),
-			bnc2 = L.BatchNormalization(32),
-			bnc3 = L.BatchNormalization(64),
-			bnc4 = L.BatchNormalization(64),
-			bnc5 = L.BatchNormalization(128),
-			bnc6 = L.BatchNormalization(128),
-			bnc7 = L.BatchNormalization(256),
+			bnc1 = L.BatchNormalization(base),
+			bnc2 = L.BatchNormalization(base),
+			bnc3 = L.BatchNormalization(base*2),
+			bnc4 = L.BatchNormalization(base*2),
+			bnc5 = L.BatchNormalization(base*4),
+			bnc6 = L.BatchNormalization(base*4),
+			bnc7 = L.BatchNormalization(base*8),
 		)
 
-	def forward(self,x):
+	def __call__(self,x):
 		h = F.relu(self.bnc1(self.conv1(x)))
 		h = F.relu(self.bnc2(self.conv2(h)))
 		h = F.relu(self.bnc3(self.conv3(h)))
