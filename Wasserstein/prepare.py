@@ -2,6 +2,30 @@ import cv2
 import os
 import numpy as np
 
+def sharpImage(img, sigma, k_sigma, p):
+    sigma_large = sigma * k_sigma
+    G_small = cv2.GaussianBlur(img,(0, 0), sigma)
+    G_large = cv2.GaussianBlur(img,(0, 0), sigma_large)
+    S = (1+p) * G_small - p * G_large
+
+    return S
+
+def softThreshold(SI, epsilon, phi):
+    T = np.zeros(SI.shape)
+    SI_bright = SI >= epsilon
+    SI_dark = SI < epsilon
+    T[SI_bright] = 1.0
+    T[SI_dark] = 1.0 + np.tanh( phi * (SI[SI_dark] - epsilon))
+
+    return T
+
+def xdog(img, sigma, k_sigma, p, epsilon, phi):
+    S = sharpImage(img, sigma, k_sigma, p)
+    SI = np.multiply(img, S)
+    T = softThreshold(SI, epsilon, phi)
+
+    return T
+
 def prepare_dataset_line(filename):
     image_path = filename
     image = cv2.imread(image_path)
