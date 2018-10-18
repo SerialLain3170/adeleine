@@ -16,8 +16,8 @@ $ python colorization.py
 
 ## Result
 私の環境で着色した画像を以下に示す。
-![result](https://github.com/SerialLain3170/Line-to-Color/blob/master/result.png)
-![result2](https://github.com/SerialLain3170/Line-to-Color/blob/master/result2.png)
+![result](https://github.com/SerialLain3170/Line-to-Color/blob/master/pix2pix/result.png)
+![result2](https://github.com/SerialLain3170/Line-to-Color/blob/master/pix2pix/result2.png)
 - バッチサイズは10
 - 最適化手法はAdam(α=0.0002, β1=0.5)
 - 平均絶対値誤差の重みは10.0
