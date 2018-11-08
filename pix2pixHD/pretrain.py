@@ -6,11 +6,8 @@ import numpy as np
 import os
 import argparse
 import pylab
-import requests
-from model import Global_Generator,Local_Enhancer,Discriminator,VGG
+from model import Global_Generator,Local_Enhancer,Discriminator
 from prepare import prepare_dataset_line,prepare_dataset_color
-import matplotlib
-matplotlib.use('Agg')
 
 xp=cuda.cupy
 cuda.get_device(0).use()
@@ -26,6 +23,12 @@ def calc_loss(fake,real):
     for f,r in zip(fake,real):
         _,c,h,w=f.shape
         loss+=F.mean_absolute_error(f,r) / (c*h*w)
+
+    return loss
+
+def calc_content_loss(fake,real):
+    _,c,h,w=fake.shape
+    loss=F.mean_absolute_error(fake,real) / (c*h*w)
 
     return loss
 
@@ -45,7 +48,7 @@ testsize=args.testsize
 weight=args.weight
 iterations=args.iterations
 
-outdir="./output/"
+outdir="./output_pretrain/"
 if not os.path.exists(outdir):
     os.mkdir(outdir)
 
@@ -69,11 +72,6 @@ color_test = chainer.as_variable(color_test)
 global_generator=Global_Generator()
 global_generator.to_gpu()
 gg_opt=set_optimizer(global_generator)
-serializers.load_npz("./global_generator_pretrain.model",global_generator)
-
-local_enhancer=Local_Enhancer()
-local_enhancer.to_gpu()
-le_opt=set_optimizer(local_enhancer)
 
 discriminator=Discriminator()
 discriminator.to_gpu()
@@ -87,16 +85,7 @@ discriminator_4=Discriminator()
 discriminator_4.to_gpu()
 dis4_opt=set_optimizer(discriminator_4)
 
-#vgg=VGG()
-#vgg.to_gpu()
-#vgg_opt=set_optimizer(vgg)
-#vgg.base.disable_update()
-
 for epoch in range(epochs):
-    if epoch <= 25:
-        global_generator.disable_update()
-    else:
-        global_generator.enable_update()
     sum_gen_loss=0
     sum_dis_loss=0
     for batch in range(0,iterations,batchsize):
@@ -112,6 +101,8 @@ for epoch in range(epochs):
 
         line=chainer.as_variable(xp.array(line_box).astype(xp.float32))
         color=chainer.as_variable(xp.array(color_box).astype(xp.float32))
+        line=F.average_pooling_2d(line,3,stride=2,pad=1)
+        color=F.average_pooling_2d(color,3,stride=2,pad=1)
 
         color_2=F.average_pooling_2d(color,3,2,1)
         color_4=F.average_pooling_2d(color_2,3,2,1)
@@ -119,86 +110,84 @@ for epoch in range(epochs):
         line_2=F.average_pooling_2d(line,3,2,1)
         line_4=F.average_pooling_2d(line_2,3,2,1)
 
-        _,gg=global_generator(line_2)
-        fake=local_enhancer(line,gg)
-
+        fake,_=global_generator(line)
         fake_2=F.average_pooling_2d(fake,3,2,1)
         fake_4=F.average_pooling_2d(fake_2,3,2,1)
 
-        dis_fake,_=discriminator(F.concat([fake,line]))
-        dis2_fake,_=discriminator_2(F.concat([fake_2,line_2]))
-        dis4_fake,_=discriminator_4(F.concat([fake_4,line_4]))
-        dis_color,_=discriminator(F.concat([color,line]))
-        dis2_color,_=discriminator_2(F.concat([color_2,line_2]))
-        dis4_color,_=discriminator_4(F.concat([color_4,line_4]))
+        dis_fake,_=discriminator(F.concat([line,fake]))
+        dis2_fake,_=discriminator_2(F.concat([line_2,fake_2]))
+        dis4_fake,_=discriminator_4(F.concat([line_4,fake_4]))
+        dis_color,_=discriminator(F.concat([line,color]))
+        dis2_color,_=discriminator_2(F.concat([line_2,color_2]))
+        dis4_color,_=discriminator_4(F.concat([line_4,color_4]))
 
         fake.unchain_backward()
         fake_2.unchain_backward()
         fake_4.unchain_backward()
 
-        adver_loss=F.mean(F.softplus(-dis_color)) + F.mean(F.softplus(dis_fake))
+        # LSGAN
+        #adver_loss=0.5*(F.sum((dis_color-1.0)**2)+F.sum(dis_fake**2))/batchsize
+        #adver_loss+=0.5*(F.sum((dis2_color-1.0)**2)+F.sum(dis2_fake**2))/batchsize
+        #adver_loss+=0.5*(F.sum((dis4_color-1.0)**2)+F.sum(dis4_fake**2))/batchsize
+
+        # DCGAN
+        adver_loss = F.mean(F.softplus(-dis_color)) + F.mean(F.softplus(dis_fake))
         adver_loss+=F.mean(F.softplus(-dis2_color)) + F.mean(F.softplus(dis2_fake))
         adver_loss+=F.mean(F.softplus(-dis4_color)) + F.mean(F.softplus(dis4_fake))
 
         discriminator.cleargrads()
         discriminator_2.cleargrads()
         discriminator_4.cleargrads()
-        discriminator.to_gpu()
         adver_loss.backward()
         dis_opt.update()
         dis2_opt.update()
         dis4_opt.update()
         adver_loss.unchain_backward()
 
-        _,gg=global_generator(line_2)
-        fake=local_enhancer(line,gg)
+        fake,_=global_generator(line)
         fake_2=F.average_pooling_2d(fake,3,2,1)
         fake_4=F.average_pooling_2d(fake_2,3,2,1)
 
-        dis_fake,fake_feat=discriminator(F.concat([fake,line]))
-        dis2_fake,fake_feat2=discriminator_2(F.concat([fake_2,line_2]))
-        dis4_fake,fake_feat3=discriminator_4(F.concat([fake_4,line_4]))
-        dis_color,real_feat=discriminator(F.concat([color,line]))
-        dis2_color,real_feat2=discriminator_2(F.concat([color_2,line_2]))
-        dis4_color,real_feat3=discriminator_4(F.concat([color_4,line_4]))
+        dis_fake,fake_feat=discriminator(F.concat([line,fake]))
+        dis2_fake,fake_feat2=discriminator_2(F.concat([line_2,fake_2]))
+        dis4_fake,fake_feat3=discriminator_4(F.concat([line_4,fake_4]))
+        _,real_feat=discriminator(F.concat([line,color]))
+        _,real_feat2=discriminator_2(F.concat([line_2,color_2]))
+        _,real_feat3=discriminator_4(F.concat([line_4,color_4]))
 
+        # LSGAN
+        #gen_loss=0.5*(F.sum((dis_fake-1.0)**2))/batchsize
+        #gen_loss+=0.5*(F.sum((dis2_fake-1.0)**2))/batchsize
+        #gen_loss+=0.5*(F.sum((dis4_fake-1.0)**2))/batchsize
+
+        # DCGAN
         gen_loss=F.mean(F.softplus(-dis_fake))
         gen_loss+=F.mean(F.softplus(-dis2_fake))
         gen_loss+=F.mean(F.softplus(-dis4_fake))
+
+        content_loss=calc_content_loss(fake,color)
+        content_loss+=calc_content_loss(fake_2,color_2)
+        content_loss+=calc_content_loss(fake_4,color_4)
 
         feat_loss=calc_loss(real_feat,fake_feat)
         feat_loss+=calc_loss(real_feat2,fake_feat2)
         feat_loss+=calc_loss(real_feat3,fake_feat3)
 
-        #perc_fake=vgg(fake)
-        #perc_color=vgg(color)
-        #percep_loss=calc_loss(perc_fake,perc_color)
-
-        content_loss=F.mean_absolute_error(color,fake)
-        content_loss+=F.mean_absolute_error(color_2,fake_2)
-        content_loss+=F.mean_absolute_error(color_4,fake_4)
-
-        gen_loss+=weight * (feat_loss+content_loss)
+        gen_loss+=weight * (content_loss+feat_loss)
 
         global_generator.cleargrads()
-        local_enhancer.cleargrads()
-        #vgg.cleargrads()
         gen_loss.backward()
         gg_opt.update()
-        le_opt.update()
-        #vgg_opt.update()
         gen_loss.unchain_backward()
 
         sum_dis_loss+=adver_loss.data.get()
         sum_gen_loss+=gen_loss.data.get()
 
         if batch==0:
-            serializers.save_npz("global_generator",global_generator)
-            serializers.save_npz("local_enhancer",local_enhancer)
+            serializers.save_npz("global_generator_pretrain.model",global_generator)
             with chainer.using_config("train", False):
-                line_test_2=F.average_pooling_2d(line_test,(2,2))
-                _,gg=global_generator(line_test_2)
-                y = local_enhancer(line_test,gg)
+                line_test_2=F.average_pooling_2d(line_test,3,stride=2,pad=1)
+                y,_=global_generator(line_test_2)
             y = y.data.get()
             sr = line_test.data.get()
             cr = color_test.data.get()
