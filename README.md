@@ -17,6 +17,7 @@ Paper -> [here](https://arxiv.org/pdf/1808.03240v1.pdf)
 Paper -> [here](https://arxiv.org/pdf/1711.11585.pdf)
 
 ![here](https://github.com/SerialLain3170/Line-to-Color/blob/master/pix2pixHD/visualize_125.png)
+
 ※真ん中はGround Truth
 
 ### UserHint
