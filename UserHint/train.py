@@ -1,196 +1,154 @@
 import chainer
-import chainer.links as L
 import chainer.functions as F
-from chainer import cuda, Chain, optimizers, initializers, serializers
 import numpy as np
-import os
 import argparse
-import pylab
-from prepare import prepare_dataset
-from model import VGG,Generator,Discriminator
-import i2v
+
+from chainer import cuda, serializers
+from pathlib import Path
+from model import Generator, Discriminator, VGG
+from utils import set_optimizer
+from dataset import DataLoader
+from evaluation import Evaluation
 
 xp = cuda.cupy
 cuda.get_device(0).use()
 
-illust2vec = i2v.make_i2v_with_chainer("./illust2vec_ver200.caffemodel")
 
-def set_optimizer(model, alpha=0.0002, beta1=0.5, beta2 = 0.99):
-    optimizer = optimizers.Adam(alpha = alpha, beta1 = beta1, beta2 = beta2)
-    optimizer.setup(model)
+class LossFunction:
+    def __init__(self):
+        pass
 
-    return optimizer
+    @staticmethod
+    def content_loss(y, t):
+        return F.mean_absolute_error(y, t)
 
-def calc_content_loss(fake, real):
-    _, c,w,h = fake.shape
-    return F.mean_squared_error(fake, real) / (c*w*h)
+    @staticmethod
+    def perceptual_loss(vgg, y, t):
+        y_feat = vgg(y)
+        t_feat = vgg(t)
+        sum_loss = 0
+        for yf, tf in zip(y_feat, t_feat):
+            sum_loss += F.mean_squared_error(yf, tf)
 
-parser = argparse.ArgumentParser(description="Colorization")
-parser.add_argument("--epoch",default=1000,type=int,help="the number of epochs")
-parser.add_argument("--batchsize", default=16, type= int, help="batchsize")
-parser.add_argument("--interval",default=1,type=int,help="the interval of snapshot")
-parser.add_argument("--testsize",default=2,type=int,help="testsize")
-parser.add_argument("--Ntrain",default=19000,type=int,help="the number of train images")
-parser.add_argument("--aw",default=0.01,type=float,help="the weight of adversarial loss")
-parser.add_argument("--pw",default=10.0,type=float,help="the weight of penalty loss")
-parser.add_argument("--dw",default=0.001,type=float,help="epsilon drift")
+        return sum_loss
 
-args = parser.parse_args()
-epochs = args.epoch
-batchsize = args.batchsize
-interval = args.interval
-testsize = args.testsize
-Ntrain = args.Ntrain
-adver_weight = args.aw
-penalty_weight = args.pw
-epsilon_drift = args.dw
+    @staticmethod
+    def dis_hinge_loss(y, t):
+        return F.mean(F.relu(1. - t)) + F.mean(F.relu(1. + y))
 
-output_dir = "./output/"
-if not os.path.exists(output_dir):
-    os.mkdir(output_dir)
+    @staticmethod
+    def gen_hinge_loss(y):
+        return -F.mean(y)
 
-model_dir = "./model/"
-if not os.path.exists(model_dir):
-    os.mkdir(model_dir)
+    @staticmethod
+    def positive_enforcing_loss(y):
+        sum_loss = 0
+        b, c, h, w = y.shape
+        for color in range(3):
+            ch = y[:, color, :, :]
+            mean = F.mean(ch)
+            mean = mean * chainer.as_variable(xp.ones(shape=(b, h, w)).astype(xp.float32))
+            loss = F.mean_squared_error(ch, mean)
+            sum_loss += loss
 
-line_path = "/line/"
-color_path = "/color/"
-line_box = []
-color_box = []
-i_mask_box = []
-i_mask_ds_box = []
-for index in range(testsize):
-    rnd = np.random.randint(Ntrain+1, Ntrain+ 400)
-    filename = "trim_free_" + str(rnd) + ".png"
-    color,line, image_mask, image_mask_ds = prepare_dataset(line_path + filename, color_path + filename)
-    line_box.append(line)
-    color_box.append(color)
-    i_mask_box.append(image_mask)
-    i_mask_ds_box.append(image_mask_ds)
+        return -sum_loss
 
-line_test = chainer.as_variable(xp.array(line_box).astype(xp.float32))
-color_test = chainer.as_variable(xp.array(color_box).astype(xp.float32))
-image_mask_test = chainer.as_variable(xp.array(i_mask_box).astype(xp.float32))
-image_mask_ds_test = chainer.as_variable(xp.array(i_mask_ds_box).astype(xp.float32))
 
-line_test = F.concat([line_test, image_mask_test])
+def train(epochs, iterations, path, outdir, batchsize, validsize,
+          adv_weight, enf_weight):
+    # Dataset Definition
+    dataloader = DataLoader(path)
+    print(dataloader)
+    color_valid, line_valid, mask_valid, ds_valid = dataloader(validsize, mode="valid")
 
-generator = Generator()
-generator.to_gpu()
-gen_opt = set_optimizer(generator)
+    # Model & Optimizer Definition
+    generator = Generator()
+    generator.to_gpu()
+    gen_opt = set_optimizer(generator)
 
-discriminator = Discriminator()
-discriminator.to_gpu()
-dis_opt = set_optimizer(discriminator)
+    discriminator = Discriminator()
+    discriminator.to_gpu()
+    dis_opt = set_optimizer(discriminator)
 
-vgg = VGG()
-vgg.to_gpu()
-vgg_opt = set_optimizer(vgg)
-vgg.base.disable_update()
+    vgg = VGG()
+    vgg.to_gpu()
+    vgg_opt = set_optimizer(vgg)
+    vgg.base.disable_update()
 
-extractor_test = vgg(line_test[:, 0:3, :, :], extract=True)
-extractor_test = F.average_pooling_2d(extractor_test, 3,2,1)
-extractor_test.unchain_backward()
+    # Loss Function Definition
+    lossfunc = LossFunction()
 
-for epoch in range(epochs):
-    sum_dis_loss = 0
-    sum_gen_loss = 0
-    for batch in range(0,2000,batchsize):
-        line_box = []
-        color_box = []
-        i_mask_box = []
-        i_mask_ds_box = []
-        for index in range(batchsize):
-            rnd = np.random.randint(1,Ntrain)
-            filename = "trim_free_" + str(rnd) + ".png"
-            color,line, image_mask, image_mask_ds = prepare_dataset(line_path+filename, color_path + filename)
-            line_box.append(line)
-            color_box.append(color)
-            i_mask_box.append(image_mask)
-            i_mask_ds_box.append(image_mask_ds)
+    # Evaluation Definition
+    evaluator = Evaluation()
 
-        line = chainer.as_variable(xp.array(line_box).astype(xp.float32))
-        color = chainer.as_variable(xp.array(color_box).astype(xp.float32))
-        image_mask = chainer.as_variable(xp.array(i_mask_box).astype(xp.float32))
-        image_mask_ds = chainer.as_variable(xp.array(i_mask_ds_box).astype(xp.float32))
+    for epoch in range(epochs):
+        sum_loss = 0
+        for batch in range(0, iterations, batchsize):
+            color, line, mask, mask_ds = dataloader(batchsize)
+            line_input = F.concat([line, mask])
 
-        line = F.concat([line, image_mask])
+            extractor = vgg(line, extract=True)
+            extractor = F.average_pooling_2d(extractor, 3, 2, 1)
+            extractor.unchain_backward()
 
-        extractor = vgg(line[:, 0:3, :, :], extract=True)
-        extractor = F.average_pooling_2d(extractor,3,2,1)
-        extractor.unchain_backward()
+            fake = generator(line_input, mask_ds, extractor)
+            y_dis = discriminator(fake, extractor)
+            t_dis = discriminator(color, extractor)
+            loss = adv_weight * lossfunc.dis_hinge_loss(y_dis, t_dis)
 
-        fake = generator(line,image_mask_ds,extractor)
-        y_dis = discriminator(fake, extractor)
-        t_dis = discriminator(color, extractor)
-        dis_loss = F.mean(F.softplus(y_dis)) + F.mean(F.softplus(-t_dis))
+            fake.unchain_backward()
 
-        #rnd_x = xp.random.uniform(0,1,fake.shape).astype(xp.float32)
-        #x_perturbed = chainer.as_variable(rnd_x*fake + (1.0-rnd_x)*color)
+            discriminator.cleargrads()
+            loss.backward()
+            dis_opt.update()
+            loss.unchain_backward()
 
-        fake.unchain_backward()
+            fake = generator(line_input, mask_ds, extractor)
+            y_dis = discriminator(fake, extractor)
 
-        #y_perturbed  = discriminator(x_perturbed, extractor)
-        #grad, = chainer.grad([y_perturbed],[x_perturbed], enable_double_backprop=True)
-        #grad = F.sqrt(F.batch_l2_norm_squared(grad))
-        #loss_grad = penalty_weight * F.mean_squared_error(grad, xp.ones_like(grad.data))
+            loss = adv_weight * lossfunc.gen_hinge_loss(y_dis)
+            loss += lossfunc.content_loss(fake, color)
+            loss += enf_weight * lossfunc.positive_enforcing_loss(fake)
 
-        #dis_loss += loss_grad
+            generator.cleargrads()
+            loss.backward()
+            gen_opt.update()
+            loss.unchain_backward()
 
-        discriminator.cleargrads()
-        dis_loss.backward()
-        dis_opt.update()
-        dis_loss.unchain_backward()
+            sum_loss += loss.data
 
-        fake = generator(line, image_mask_ds, extractor)
-        y_dis = discriminator(fake, extractor)
+            if batch == 0:
+                serializers.save_npz(f"{outdir}/generator_{epoch}.model", generator)
 
-        gen_loss = adver_weight * F.mean(F.softplus(-y_dis))
-        #fake_feat = vgg(fake)
-        #real_feat = vgg(color)
-        #vgg_loss = calc_content_loss(fake_feat, real_feat)
-        vgg_loss = F.mean_absolute_error(fake,color)
-        gen_loss += vgg_loss
-        
-        vgg.cleargrads()
-        generator.cleargrads()
-        gen_loss.backward()
-        gen_opt.update()
-        vgg_opt.update()
-        gen_loss.unchain_backward()
-        
-        sum_gen_loss += gen_loss.data.get()
-        sum_dis_loss += dis_loss.data.get()
+                extractor = vgg(line_valid, extract=True)
+                extractor = F.average_pooling_2d(extractor, 3, 2, 1)
+                extractor.unchain_backward()
+                line_valid_input = F.concat([line_valid, mask_valid])
+                with chainer.using_config('train', False):
+                    y_valid = generator(line_valid_input, ds_valid, extractor)
+                y_valid = y_valid.data.get()
+                c_valid = color_valid.data.get()
+                input_valid = line_valid_input.data.get()
 
-        if epoch % interval == 0 and batch == 0:
-            serializers.save_npz("./model/generator_aug_{}.model".format(epoch),generator)
-            with chainer.using_config("train", False):
-                y = generator(line_test,image_mask_ds_test, extractor_test)
-            y = y.data.get()
-            sr = line_test.data.get()
-            cr = color_test.data.get()
-            im = image_mask_test.data.get()
-            for i_ in range(testsize):
-                tmp = (np.clip((sr[i_,0:3,:,:])*127.5 + 127.5, 0, 255)).transpose(1,2,0).astype(np.uint8)
-                pylab.subplot(testsize,4,4*i_+1)
-                pylab.imshow(tmp)
-                pylab.axis('off')
-                tmp = (np.clip((sr[i_,3:6,:,:])*127.5 + 127.5, 0, 255)).transpose(1,2,0).astype(np.uint8)
-                pylab.subplot(testsize,4,4*i_+2)
-                pylab.imshow(tmp)
-                pylab.axis('off')
-                pylab.savefig('%s/visualize_%d.png'%(output_dir, epoch))
-                tmp = (np.clip((cr[i_,:,:,:])*127.5 + 127.5, 0, 255)).transpose(1,2,0).astype(np.uint8)
-                pylab.subplot(testsize,4,4*i_+3)
-                pylab.imshow(tmp)
-                pylab.axis('off')
-                pylab.savefig('%s/visualize_%d.png'%(output_dir, epoch))
-                tmp = (np.clip((y[i_,:,:,:])*127.5 + 127.5, 0, 255)).transpose(1,2,0).astype(np.uint8)
-                pylab.subplot(testsize,4,4*i_+4)
-                pylab.imshow(tmp)
-                pylab.axis('off')
-                pylab.savefig('%s/visualize_%d.png'%(output_dir, epoch))
-    
-    print("epoch : {}".format(epoch))
-    print("Generator loss : {}".format(sum_gen_loss/Ntrain))
-    print("Discriminator loss : {}".format(sum_dis_loss/Ntrain))
+                evaluator(y_valid, c_valid, input_valid, outdir, epoch, validsize)
+
+        print(f"epoch: {epoch}")
+        print(f"loss: {sum_loss / iterations}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="RAM")
+    parser.add_argument('--e', type=int, default=1000, help="the number of epochs")
+    parser.add_argument('--i', type=int, default=20000, help="the number of iterations")
+    parser.add_argument('--b', type=int, default=32, help="batch size")
+    parser.add_argument('--v', type=int, default=4, help="valid size")
+    parser.add_argument('--enf', type=float, default=0.001, help="the weight of content loss")
+    parser.add_argument('--a', type=float, default=0.01, help="the weight of adversarial loss")
+
+    args = parser.parse_args()
+
+    dataset_path = Path('./Dataset/danbooru-images')
+    outdir = Path('./outdir_train2')
+    outdir.mkdir(exist_ok=True)
+
+    train(args.e, args.i, dataset_path, outdir, args.b, args.v, args.a, args.enf)
