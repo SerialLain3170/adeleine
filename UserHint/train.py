@@ -5,7 +5,7 @@ import argparse
 
 from chainer import cuda, serializers
 from pathlib import Path
-from model import Generator, Discriminator, VGG
+from model import Generator, Discriminator, VGG, SAGenerator
 from utils import set_optimizer
 from dataset import DataLoader
 from evaluation import Evaluation
@@ -62,7 +62,7 @@ def train(epochs, iterations, path, outdir, batchsize, validsize,
     color_valid, line_valid, mask_valid, ds_valid = dataloader(validsize, mode="valid")
 
     # Model & Optimizer Definition
-    generator = Generator()
+    generator = SAGenerator(attn_type="se")
     generator.to_gpu()
     gen_opt = set_optimizer(generator)
 
@@ -87,7 +87,7 @@ def train(epochs, iterations, path, outdir, batchsize, validsize,
             color, line, mask, mask_ds = dataloader(batchsize)
             line_input = F.concat([line, mask])
 
-            extractor = vgg(line, extract=True)
+            extractor = vgg(mask, extract=True)
             extractor = F.average_pooling_2d(extractor, 3, 2, 1)
             extractor.unchain_backward()
 
@@ -107,8 +107,8 @@ def train(epochs, iterations, path, outdir, batchsize, validsize,
             y_dis = discriminator(fake, extractor)
 
             loss = adv_weight * lossfunc.gen_hinge_loss(y_dis)
-            loss += lossfunc.content_loss(fake, color)
             loss += enf_weight * lossfunc.positive_enforcing_loss(fake)
+            loss += lossfunc.content_loss(fake, color)
 
             generator.cleargrads()
             loss.backward()
@@ -136,6 +136,102 @@ def train(epochs, iterations, path, outdir, batchsize, validsize,
         print(f"loss: {sum_loss / iterations}")
 
 
+def twostage_train(epochs, iterations, path, outdir, batchsize, validsize,
+                   adv_weight, enf_weight):
+    # Dataset Definition
+    dataloader = DataLoader(path)
+    print(dataloader)
+    color_valid, line_valid, mask_valid, ds_valid = dataloader(validsize, mode="valid")
+
+    # Model & Optimizer Definition
+    generator = Generator()
+    generator.to_gpu()
+    gen_opt = set_optimizer(generator)
+    serializers.load_npz("./outdir_train2/generator_970.model", generator)
+
+    generator_post = Generator()
+    generator_post.to_gpu()
+    gen_post_opt = set_optimizer(generator_post)
+
+    vgg = VGG()
+    vgg.to_gpu()
+    vgg_opt = set_optimizer(vgg)
+    vgg.base.disable_update()
+
+    discriminator = Discriminator()
+    discriminator.to_gpu()
+    dis_opt = set_optimizer(discriminator)
+
+    # Loss Function Definition
+    lossfunc = LossFunction()
+
+    # Evaluation Definition
+    evaluator = Evaluation()
+
+    for epoch in range(epochs):
+        sum_loss = 0
+        for batch in range(0, iterations, batchsize):
+            color, line, mask, mask_ds = dataloader(batchsize)
+            line_input = F.concat([line, mask])
+
+            extractor = vgg(line, extract=True)
+            extractor = F.average_pooling_2d(extractor, 3, 2, 1)
+            extractor.unchain_backward()
+
+            with chainer.using_config("train", False):
+                fake = generator(line_input, mask_ds, extractor)
+            line_input = F.concat([fake, mask])
+            fake = generator_post(line_input, mask_ds, extractor)
+            y_dis = discriminator(fake, extractor)
+            t_dis = discriminator(color, extractor)
+            loss = adv_weight * lossfunc.dis_hinge_loss(y_dis, t_dis)
+
+            fake.unchain_backward()
+
+            discriminator.cleargrads()
+            loss.backward()
+            dis_opt.update()
+            loss.unchain_backward()
+
+            fake = generator_post(line_input, mask_ds, extractor)
+            y_dis = discriminator(fake, extractor)
+
+            loss = adv_weight * lossfunc.gen_hinge_loss(y_dis)
+            if epoch < 50:
+                loss += 100.0 * lossfunc.content_loss(fake, color)
+                loss += enf_weight * lossfunc.positive_enforcing_loss(fake)
+            else:
+                loss += lossfunc.content_loss(fake, color)
+
+            generator_post.cleargrads()
+            loss.backward()
+            gen_post_opt.update()
+            loss.unchain_backward()
+
+            sum_loss += loss.data
+
+            if batch == 0:
+                serializers.save_npz(f"{outdir}/generator_{epoch}.model", generator_post)
+
+                extractor = vgg(line_valid, extract=True)
+                extractor = F.average_pooling_2d(extractor, 3, 2, 1)
+                extractor.unchain_backward()
+                line_valid_input = F.concat([line_valid, mask_valid])
+                with chainer.using_config('train', False):
+                    fake = generator(line_valid_input, ds_valid, extractor)
+                    line_valid_input = F.concat([fake, mask_valid])
+                    y_valid = generator_post(line_valid_input, ds_valid, extractor)
+                y_valid = y_valid.data.get()
+                c_valid = color_valid.data.get()
+                f_valid = fake.data.get()
+                input_valid = line_valid_input.data.get()
+
+                evaluator(y_valid, c_valid, f_valid, input_valid, outdir, epoch, validsize)
+
+        print(f"epoch: {epoch}")
+        print(f"loss: {sum_loss / iterations}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RAM")
     parser.add_argument('--e', type=int, default=1000, help="the number of epochs")
@@ -147,8 +243,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    dataset_path = Path('./Dataset/danbooru-images')
-    outdir = Path('./outdir_train2')
+    dataset_path = Path('./danbooru-images/')
+    outdir = Path('./outdir_se_kerassketch/')
     outdir.mkdir(exist_ok=True)
 
     train(args.e, args.i, dataset_path, outdir, args.b, args.v, args.a, args.enf)

@@ -43,6 +43,73 @@ def pixel_shuffler(out_ch, x, r=2):
     return out_map
 
 
+class SACat(Chain):
+    def __init__(self, in_ch, out_ch):
+        super(SACat, self).__init__()
+        w = initializers.GlorotUniform()
+        with self.init_scope():
+            self.c0 = L.Convolution2D(in_ch*2, out_ch, 1, 1, 0, initialW=w)
+            self.c1 = L.Convolution2D(out_ch, out_ch, 1, 1, 0, initialW=w)
+
+    def __call__(self, x, extractor):
+        h = F.relu(self.c0(F.concat([x, extractor])))
+        h = F.sigmoid(self.c1(h))
+
+        return h
+
+
+class SECat(Chain):
+    def __init__(self, in_ch, out_ch):
+        super(SECat, self).__init__()
+        w = initializers.GlorotUniform()
+        with self.init_scope():
+            self.l0 = L.Linear(in_ch*2, out_ch, initialW=w, nobias=True)
+            self.l1 = L.Linear(out_ch, in_ch, initialW=w, nobias=True)
+
+    def __call__(self, x, extractor):
+        batch, ch, height, width = x.shape
+        x_pool = F.average_pooling_2d(x, (height, width)).reshape(batch, ch)
+        extractor = F.average_pooling_2d(extractor, (height, width)).reshape(batch, ch)
+
+        h = F.relu(self.l0(F.concat([x_pool, extractor])))
+        h = F.sigmoid(self.l1(h)).reshape(batch, ch, 1, 1)
+        h = F.tile(h, (1, 1, height, width))
+
+        return h
+
+
+class SECatResBlock(Chain):
+    def __init__(self, in_ch, out_ch):
+        super(SECatResBlock, self).__init__()
+        w = initializers.GlorotUniform()
+        with self.init_scope():
+            self.c0 = L.Convolution2D(in_ch, out_ch, 3, 1, 1, initialW=w)
+            self.bn0 = L.BatchNormalization(out_ch)
+            self.se = SECat(out_ch, int(out_ch/16))
+
+    def __call__(self, x, extractor):
+        h = F.relu(self.bn0(self.c0(x)))
+        h = h * self.se(h, extractor)
+
+        return h + x
+
+
+class SACatResBlock(Chain):
+    def __init__(self, in_ch, out_ch):
+        super(SACatResBlock, self).__init__()
+        w = initializers.GlorotUniform()
+        with self.init_scope():
+            self.c0 = L.Convolution2D(in_ch, out_ch, 3, 1, 1, initialW=w)
+            self.bn0 = L.BatchNormalization(out_ch)
+            self.sa = SACat(out_ch, out_ch)
+
+    def __call__(self, x, extractor):
+        h = F.relu(self.bn0(self.c0(x)))
+        h = h * self.sa(h, extractor)
+
+        return h + x
+
+
 class ResBlock(Chain):
     def __init__(self, in_ch, out_ch):
         super(ResBlock, self).__init__()
@@ -117,7 +184,11 @@ class Generator(Chain):
         for _ in range(layer):
             res.add_link(ResBlock(base*16, base*16))
         with self.init_scope():
+            # Input layer
             self.c0 = L.Convolution2D(6, base, 3, 1, 1, initialW=w)
+            self.bn0 = L.BatchNormalization(base)
+
+            # UNet
             self.cbr0 = CBR(base, base*2)
             self.cbr1 = CBR(base*4, base*4)
             self.cbr2 = CBR(base*4, base*8)
@@ -127,10 +198,14 @@ class Generator(Chain):
             self.up1 = Upsamp(base*16, base*4)
             self.up2 = Upsamp(base*8, base*2)
             self.up3 = Upsamp(base*4, base)
+
+            # Output layer
             self.c1 = L.Convolution2D(base*2, 3, 3, 1, 1, initialW=w)
-            self.bn0 = L.BatchNormalization(base)
+
+            # Attention Block
             self.attn = AttentionBlock(base*16, base*16)
 
+            # Mask Feature Extractor
             self.cmask = L.Convolution2D(3, base*2, 3, 1, 1, initialW=w)
             self.bmask = L.BatchNormalization(base*2)
 
@@ -156,6 +231,67 @@ class Generator(Chain):
         h = self.attn(h5, hextract)
         for i, res in enumerate(self.res.children()):
             h = res(h)
+        h = self.up0(h)
+        inp = F.concat([h, h4], axis=1)
+        h = self.up1(inp)
+        inp = F.concat([h, h3], axis=1)
+        h = self.up2(inp)
+        inp = F.concat([h, h2], axis=1)
+        h = self.up3(inp)
+        inp = F.concat([h, h1], axis=1)
+        h = F.tanh(self.c1(inp))
+
+        return h
+
+
+class SAGenerator(Chain):
+    def __init__(self, base=32, layer=8, attn_type="sa"):
+        super(SAGenerator, self).__init__()
+        w = initializers.GlorotUniform()
+        res = chainer.ChainList()
+        for _ in range(layer):
+            if attn_type == "sa":
+                res.add_link(SACatResBlock(base*16, base*16))
+            elif attn_type == "se":
+                res.add_link(SECatResBlock(base*16, base*16))
+        with self.init_scope():
+            self.c0 = L.Convolution2D(6, base, 3, 1, 1, initialW=w)
+            self.bn0 = L.BatchNormalization(base)
+            self.cbr0 = CBR(base, base*2)
+            self.cbr1 = CBR(base*4, base*4)
+            self.cbr2 = CBR(base*4, base*8)
+            self.cbr3 = CBR(base*8, base*16)
+            self.res = res
+            self.up0 = Upsamp(base*16, base*8)
+            self.up1 = Upsamp(base*16, base*4)
+            self.up2 = Upsamp(base*8, base*2)
+            self.up3 = Upsamp(base*4, base)
+            self.c1 = L.Convolution2D(base*2, 3, 3, 1, 1, initialW=w)
+
+            self.cmask = L.Convolution2D(3, base*2, 3, 1, 1, initialW=w)
+            self.bmask = L.BatchNormalization(base*2)
+
+            self.cext1 = L.Convolution2D(base*16, base*16, 3, 1, 1, initialW=w)
+            self.cext2 = L.Convolution2D(base*16, base*16, 3, 1, 1, initialW=w)
+            self.bext1 = L.BatchNormalization(base*16)
+            self.bext2 = L.BatchNormalization(base*16)
+
+    def __call__(self, x, mask, extractor):
+        # Mask Extractor
+        hmask = F.relu(self.bmask(self.cmask(mask)))
+
+        # Line Art Extractor
+        hextract = F.relu(self.bext1(self.cext1(extractor)))
+        hextract = F.relu(self.bext2(self.cext2(hextract)))
+
+        # Main Stream
+        h1 = F.relu(self.bn0(self.c0(x)))
+        h2 = self.cbr0(h1)
+        h3 = self.cbr1(F.concat([h2, hmask]))
+        h4 = self.cbr2(h3)
+        h = self.cbr3(h4)
+        for i, res in enumerate(self.res.children()):
+            h = res(h, hextract)
         h = self.up0(h)
         inp = F.concat([h, h4], axis=1)
         h = self.up1(inp)
