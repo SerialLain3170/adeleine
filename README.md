@@ -22,3 +22,6 @@ pix2pixを中心に線画着色を行う。
 今までは、線画のみを与えて着色を行っていた。ここでは、カラーヒントを与えて着色を行う
 
 ![here](https://github.com/SerialLain3170/Line-to-Color/blob/master/UserHint/example.png)
+
+### style2paints
+![here](https://github.com/SerialLain3170/Colorization/blob/master/style2paints/Result.png)
