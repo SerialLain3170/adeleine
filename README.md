@@ -1,5 +1,23 @@
-# Line-to-Color
-pix2pixを中心に線画着色を行う。
+# Automatic Line Art Colorization
+
+## Introduction
+This repository implements converting line arts into color images automatically. Of course, we can train the neural network to deal with line art only. However, in the application system, we also need to colorize the line art with designated color in advance. There are many types of colorization with respect to hint.
+
+- No hint
+  - Colorization without hint
+  - Input: Line art only
+  
+- Atari
+  - Colorization with hint which is line of desired color in the specific region
+  - Input: Line art and atari
+  
+- Tag
+  - Colorzation with hint which is tag
+  - Input: Line art and tag
+  
+- Reference
+  - Colorization with hint which is reference image 
+  - Input: Line art and reference image
 
 ## Quick Results
 ### pix2pix
