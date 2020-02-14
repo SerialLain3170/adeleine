@@ -121,10 +121,10 @@ class Generator(Chain):
         return F.tanh(h)
 
 
-class Discriminator(Chain):
+class DiscriminatorBlock(Chain):
     def __init__(self, base=64):
         w = initializers.GlorotUniform()
-        super(Discriminator, self).__init__()
+        super(DiscriminatorBlock, self).__init__()
         with self.init_scope():
             self.c0 = SNConvolution2D(6, base, 4, 2, 1, initialW=w)
             self.c1 = SNConvolution2D(base, base*2, 4, 2, 1, initialW=w)
@@ -146,6 +146,30 @@ class Discriminator(Chain):
         h = self.c4(h4)
 
         return h, [h1, h2, h3, h4]
+
+
+class Discriminator(Chain):
+    def __init__(self, base=64):
+        super(Discriminator, self).__init__()
+        discriminators = chainer.ChainList()
+        for _ in range(3):
+            discriminators.add_link(DiscriminatorBlock())
+        with self.init_scope():
+            self.dis = discriminators
+
+    def __call__(self, x):
+        adv_list = []
+        feat_list = []
+
+        for index in range(3):
+            h, h_list = self.dis[index](x)
+
+            adv_list.append(h)
+            feat_list.append(h_list)
+
+            x = F.average_pooling_2d(x, 3, 2, 1)
+
+        return adv_list, feat_list
 
 
 class Prior(chainer.Link):

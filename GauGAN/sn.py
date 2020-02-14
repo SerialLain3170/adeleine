@@ -8,6 +8,7 @@ from chainer.functions.connection import linear
 from chainer.links.connection.linear import Linear
 import chainer.functions as F
 
+
 def _l2normalize(v, eps=1e-12):
     norm = cuda.reduce('T x', 'T out',
                        'x * x', 'a + b', 'out = sqrt(a)', 0,
@@ -18,6 +19,7 @@ def _l2normalize(v, eps=1e-12):
                            'div_sn')
                            
     return div(v, norm(v), eps)
+
 
 def max_singular_value(W, u=None, Ip=1):
     """
@@ -36,6 +38,7 @@ def max_singular_value(W, u=None, Ip=1):
     sigma = F.sum(F.linear(_u, F.transpose(W)) * _v)
     
     return sigma, _u, _v
+
 
 class SNConvolution2D(Convolution2D):
     """Two-dimensional convolutional layer with spectral normalization.
@@ -128,6 +131,7 @@ class SNConvolution2D(Convolution2D):
             self._initialize_params(x.shape[1])
         return convolution_2d.convolution_2d(
             x, self.W_bar, self.b, self.stride, self.pad)
+
 
 class SNLinear(Linear):
     """Linear layer with Spectral Normalization.
