@@ -19,6 +19,27 @@ This repository implements converting line arts into color images automatically.
   - Colorization with hint which is reference image (ex. style2paints V1)
   - Input: Line art and reference image
   
+## Line extraction method
+There are many variations in line extraction methods, such as XDoG or SketchKeras. But, when trained on only one type of line art, trained model comes to overfit to this type of line art and this model doesn't fully colorize another type of line art. Therefore, like Tag2Pix, I use various kinds of line art as the input of neural network.
+
+I use three types of line art below.
+
+- XDoG
+  - Line extraction using two Gaussian distributions difference to standard deviations
+  
+- SketchKeras
+  - Line extraction using UNet. Lines obtained by SketchKeras are like pencil drawings.
+  
+- Sketch Simplification
+  - Line extraction using Fully-Convolutional Networks. Lines obtained by Sketch Simplification are like digital drawings.
+
+Examples obtained by these line extraction methods are as follows.  
+Moreover, I consider three types of data augmenation to line arts in order to avoid overfitting.
+
+- Adding intensity
+- Randomly morphology transformation to deal with various thicks of lines
+- Randomly RGB values of lines to deal with various depths of lines
+
 ## Experiment without hint
 
 ### Motivation
