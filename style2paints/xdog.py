@@ -29,14 +29,11 @@ def xdog(img, sigma, k_sigma, p, epsilon, phi):
     return T
 
 
-def line_process(filename):
+def xdog_process(filename):
     img = cv.imread(filename)
     img = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
     img = img / 255.0
     sigma = np.random.choice([0.3, 0.4, 0.5])
     img = xdog(img, sigma, 4.5, 19, 0.01, 10^9)
-    img = img * 255
-    img = img.reshape(img.shape[0], img.shape[1], 1)
-    img = np.tile(img, (1, 1, 3))
 
     return img
