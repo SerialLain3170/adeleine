@@ -31,12 +31,15 @@ First of all, I need to confirm that method based on neural networks can coloriz
 
 ### Results
 - pix2pix
+
 ![pix2pix](https://github.com/SerialLain3170/Line-to-Color/blob/master/pix2pix/result.png)
+
 
 - pix2pix-gp
 ![here](https://github.com/SerialLain3170/Colorization/blob/master/pix2pix-gp/result.png)
 
 - pix2pixHD
+
 ![here](https://github.com/SerialLain3170/Line-to-Color/blob/master/pix2pixHD/visualize_125.png)
 
 ## Experiment with atari
