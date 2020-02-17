@@ -1,4 +1,5 @@
 import numpy as np
+import cv2 as cv
 
 import matplotlib
 matplotlib.use('Agg')
@@ -15,7 +16,7 @@ class Evaluation:
 
         return tmp
 
-    def __call__(self, y, t, m, outdir, epoch, validsize):
+    def __call__(self, y, t, m, gd, outdir, epoch, validsize):
         pylab.rcParams['figure.figsize'] = (16.0, 16.0)
         pylab.clf()
 
@@ -35,8 +36,13 @@ class Evaluation:
             pylab.imshow(tmp)
             pylab.axis('off')
             pylab.savefig(f"{outdir}/visualize_{epoch}.png")
-            tmp = self._coordinate(y[index])
+            tmp = self._coordinate(gd[index])
             pylab.subplot(validsize, validsize, validsize * index + 4)
+            pylab.imshow(tmp)
+            pylab.axis('off')
+            pylab.savefig(f"{outdir}/visualize_{epoch}.png")
+            tmp = self._coordinate(y[index])
+            pylab.subplot(validsize, validsize, validsize * index + 5)
             pylab.imshow(tmp)
             pylab.axis('off')
             pylab.savefig(f"{outdir}/visualize_{epoch}.png")

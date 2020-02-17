@@ -4,8 +4,6 @@ import cv2 as cv
 import copy
 import chainer
 import chainer.functions as F
-import torch
-import colorsys
 
 from xdog import line_process
 from chainer import cuda
@@ -13,23 +11,34 @@ from pathlib import Path
 from scipy.stats import truncnorm
 from PIL import Image
 from torchvision import transforms
-from torch.utils.serialization import load_lua
+from multiprocessing import Pool
 
 xp = cuda.cupy
 cuda.get_device(0).use()
 
 
 class DataLoader:
-    def __init__(self, path, paint_type="cell", interpolate=False):
-        self.path = path
-        self.pathlist = list(self.path.glob('**/*.jpg'))
+    def __init__(self,
+                 data_path: Path,
+                 sketch_path: Path,
+                 digi_path: Path,
+                 paint_type="cell",
+                 interpolate=False,
+                 extension=".jpg",
+                 img_size=224):
+
+        self.data_path = data_path
+        self.sketch_path = sketch_path
+        self.digi_path = digi_path
+
+        self.pathlist = list(self.data_path.glob(f"**/*{extension}"))
         self.train, self.valid = self._split(self.pathlist)
         self.train_len = len(self.train)
         self.valid_len = len(self.valid)
+
+        self.size = img_size
         self.paint_type = paint_type
         self.interpolate = interpolate
-        self.digi_model, self.d_mean, self.d_std = self._digital_model_load()
-        self.line_path = Path("./danbooru-copy/")
         self.interpolations = (
             cv.INTER_LINEAR,
             cv.INTER_AREA,
@@ -39,20 +48,9 @@ class DataLoader:
         )
 
     def __str__(self):
-        return f"dataset path: {self.path} train data: {self.train_len}"
+        return f"dataset path: {self.data_path} dataset length: {self.train_len}"
 
     # Initialization method
-    def _digital_model_load(self):
-        modelpath = "model_gan.t7"
-        cache = load_lua(modelpath)
-        model = cache.model
-        immean = cache.mean
-        imstd = cache.std
-        model.evaluate()
-        model.cuda()
-
-        return model, immean, imstd
-
     def _split(self, pathlist: list):
         split_point = int(len(self.pathlist) * 0.95)
         x_train = self.pathlist[:split_point]
@@ -61,6 +59,44 @@ class DataLoader:
         return x_train, x_test
 
     # Line art preparation method
+    @staticmethod
+    def _add_intensity(img, intensity=1.7):
+        const = 255.0 ** (1.0 - intensity)
+        img = (const * (img ** intensity))
+
+        return img
+
+    @staticmethod
+    def _morphology(img):
+        method = np.random.choice(["dilate", "erode"])
+        if method == "dilate":
+            img = cv.dilate(img, (5, 5), iterations=1)
+        elif method == "erode":
+            img = cv.erode(img, (5, 5), iterations=1)
+
+        return img
+
+    @staticmethod
+    def _color_variant(img, max_value=30):
+        color = np.random.randint(max_value + 1)
+        img[img < 200] = color
+
+        return img
+
+    def _detail_preprocess(self, img):
+        intensity = np.random.randint(2)
+        morphology = np.random.randint(2)
+        color_variance = np.random.randint(2)
+
+        if intensity:
+            img = self._add_intensity(img)
+        if morphology:
+            img = self._morphology(img)
+        if color_variance:
+            img = self._color_variant(img)
+
+        return img
+
     def _xdog_preprocess(self, path):
         img = line_process(str(path))
         img = (img * 255.0).reshape(img.shape[0], img.shape[1], 1)
@@ -70,38 +106,53 @@ class DataLoader:
 
     def _pencil_preprocess(self, path):
         filename = path.name
-        line_path = self.line_path / Path(filename)
+        line_path = self.sketch_path / Path(filename)
         img = cv.imread(str(line_path))
 
         return img
 
-    def _digital_preprocess(self, img):
-        img = img[:, :, 0]
-        img = Image.fromarray(img)
-        img = ((transforms.ToTensor()(img) - self.d_mean) / self.d_std).unsqueeze(0)
-        img = self.digi_model.forward(img.cuda()).float()
-
-        img = img[0].permute(1, 2, 0).repeat(1, 1, 3)
-        img = (img * 255).detach().cpu().numpy()
+    def _digital_preprocess(self, path):
+        filename = path.name
+        line_path = self.digi_path / Path(filename)
+        img = cv.imread(str(line_path))
 
         return img
 
+    def _blend_preprocess(self, path, blend=0.5):
+        xdog_line = self._xdog_preprocess(path)
+        penc_line = self._pencil_preprocess(path)
+        penc_line = self._add_intensity(penc_line, 1.4)
+
+        xdog_blur = cv.GaussianBlur(xdog_line, (5, 5), 1)
+        xdog_blur = cv.addWeighted(xdog_blur, 0.75, xdog_line, 0.25, 0)
+
+        blend = cv.addWeighted(xdog_blur, blend, penc_line, (1 - blend), 0)
+
+        return self._add_intensity(blend, (1/1.5))
+
     def _preprocess(self, path):
-        method = np.random.choice(["xdog", "pencil", "digital"])
+        method = np.random.choice(["xdog", "pencil", "digital", "blend"])
 
         if method == "xdog":
             img = self._xdog_preprocess(path)
         elif method == "pencil":
             img = self._pencil_preprocess(path)
         elif method == "digital":
-            img = self._pencil_preprocess(path)
-            img = self._digital_preprocess(img)
+            img = self._digital_preprocess(path)
+        elif method == "blend":
+            img = self._blend_preprocess(path)
+
+        img = self._detail_preprocess(img)
 
         return img
 
     # Preprocess method
     @staticmethod
-    def _random_crop(line, color, size=224):
+    def _random_crop(line, color, size):
+        scale = np.random.randint(288, 768)
+        line = cv.resize(line, (scale, scale))
+        color = cv.resize(color, (scale, scale))
+
         height, width = line.shape[0], line.shape[1]
         rnd0 = np.random.randint(height - size - 1)
         rnd1 = np.random.randint(width - size - 1)
@@ -125,7 +176,7 @@ class DataLoader:
 
     # Hint preparation method
     @staticmethod
-    def _making_mask(mask, color, size=224):
+    def _making_mask(mask, color, size):
         choice = np.random.choice(['width', 'height', 'diag'])
 
         if choice == 'width':
@@ -156,7 +207,7 @@ class DataLoader:
 
         return mask
 
-    def _prepare_pair(self, image_path, size=224):
+    def _prepare_pair(self, image_path, size):
         interpolation = random.choice(self.interpolations)
         color = cv.imread(str(image_path))
         line = self._preprocess(image_path)
@@ -222,7 +273,7 @@ class DataLoader:
 
         return (line, mask, mask_ds)
 
-    def __call__(self, batchsize, mode='train', size=224):
+    def __call__(self, batchsize, mode='train'):
         color_box = []
         line_box = []
         mask_box = []
@@ -238,7 +289,7 @@ class DataLoader:
             else:
                 raise AttributeError
 
-            color, line, mask, mask_ds = self._prepare_pair(image_path, size=size)
+            color, line, mask, mask_ds = self._prepare_pair(image_path, size=self.size)
 
             color_box.append(color)
             line_box.append(line)
@@ -254,18 +305,31 @@ class DataLoader:
 
 
 class RefineDataset:
-    def __init__(self, path, paint_type="cell", interpolate=False):
-        self.path = path
-        self.pathlist = list(self.path.glob('**/*.jpg'))
+    def __init__(self,
+                 data_path: Path,
+                 sketch_path: Path,
+                 digi_path: Path,
+                 st_path: Path,
+                 paint_type="cell",
+                 interpolate=False,
+                 extension=".jpg",
+                 img_size=512,
+                 crop_size=256):
+
+        self.data_path = data_path
+        self.sketch_path = sketch_path
+        self.digi_path = digi_path
+        self.st_path = st_path
+
+        self.pathlist = list(self.data_path.glob(f"**/*{extension}"))
         self.train, self.valid = self._split(self.pathlist)
         self.train_len = len(self.train)
         self.valid_len = len(self.valid)
+
         self.paint_type = paint_type
         self.interpolate = interpolate
-        self.digi_model, self.d_mean, self.d_std = self._digital_model_load()
-        self.line_path = Path("./danbooru-copy/")
-        self.st_path = Path("./danbooru-st/")
-        self.size = 384
+        self.img_size = img_size
+        self.size = crop_size
         self.spray_split = 7
         self.interpolations = (
             cv.INTER_LINEAR,
@@ -276,19 +340,7 @@ class RefineDataset:
         )
 
     def __str__(self):
-        return f"dataset path: {self.path} train data: {self.train_len}"
-
-    # Initialization method
-    def _digital_model_load(self):
-        modelpath = "model_gan.t7"
-        cache = load_lua(modelpath)
-        model = cache.model
-        immean = cache.mean
-        imstd = cache.std
-        model.evaluate()
-        model.cuda()
-
-        return model, immean, imstd
+        return f"dataset path: {self.data_path} dataset length: {self.train_len}"
 
     def _split(self, pathlist: list):
         split_point = int(len(self.pathlist) * 0.95)
@@ -298,6 +350,44 @@ class RefineDataset:
         return x_train, x_test
 
     # Line art preparation method
+    @staticmethod
+    def _add_intensity(img, intensity=1.7):
+        const = 255.0 ** (1.0 - intensity)
+        img = (const * (img ** intensity))
+
+        return img
+
+    @staticmethod
+    def _morphology(img):
+        method = np.random.choice(["dilate", "erode"])
+        if method == "dilate":
+            img = cv.dilate(img, (5, 5), iterations=1)
+        elif method == "erode":
+            img = cv.erode(img, (5, 5), iterations=1)
+
+        return img
+
+    @staticmethod
+    def _color_variant(img, max_value=30):
+        color = np.random.randint(max_value + 1)
+        img[img < 200] = color
+
+        return img
+
+    def _detail_preprocess(self, img):
+        intensity = np.random.randint(2)
+        morphology = np.random.randint(2)
+        color_variance = np.random.randint(2)
+
+        if intensity:
+            img = self._add_intensity(img)
+        if morphology:
+            img = self._morphology(img)
+        if color_variance:
+            img = self._color_variant(img)
+
+        return img
+
     def _xdog_preprocess(self, path):
         img = line_process(str(path))
         img = (img * 255.0).reshape(img.shape[0], img.shape[1], 1)
@@ -307,38 +397,54 @@ class RefineDataset:
 
     def _pencil_preprocess(self, path):
         filename = path.name
-        line_path = self.line_path / Path(filename)
+        line_path = self.sketch_path / Path(filename)
         img = cv.imread(str(line_path))
 
         return img
 
-    def _digital_preprocess(self, img):
-        img = img[:, :, 0]
-        img = Image.fromarray(img)
-        img = ((transforms.ToTensor()(img) - self.d_mean) / self.d_std).unsqueeze(0)
-        img = self.digi_model.forward(img.cuda()).float()
-
-        img = img[0].permute(1, 2, 0).repeat(1, 1, 3)
-        img = (img * 255).detach().cpu().numpy()
+    def _digital_preprocess(self, path):
+        filename = path.name
+        line_path = self.digi_path / Path(filename)
+        img = cv.imread(str(line_path))
 
         return img
 
+    def _blend_preprocess(self, path, blend=0.5):
+        xdog_line = self._xdog_preprocess(path)
+        penc_line = self._pencil_preprocess(path)
+        penc_line = self._add_intensity(penc_line, 1.4)
+
+        xdog_blur = cv.GaussianBlur(xdog_line, (5, 5), 1)
+        xdog_blur = cv.addWeighted(xdog_blur, 0.75, xdog_line, 0.25, 0)
+
+        blend = cv.addWeighted(xdog_blur, blend, penc_line, (1 - blend), 0)
+
+        return self._add_intensity(blend, (1/1.5))
+
     def _preprocess(self, path):
-        method = np.random.choice(["xdog", "pencil", "digital"])
+        method = np.random.choice(["xdog", "pencil", "digital", "blend"])
 
         if method == "xdog":
             img = self._xdog_preprocess(path)
         elif method == "pencil":
             img = self._pencil_preprocess(path)
         elif method == "digital":
-            img = self._pencil_preprocess(path)
-            img = self._digital_preprocess(img)
+            img = self._digital_preprocess(path)
+        elif method == "blend":
+            img = self._blend_preprocess(path)
+
+        img = self._detail_preprocess(img)
 
         return img
 
     # Preprocess method
     @staticmethod
-    def _random_crop(line, color, color_mask, size=224):
+    def _random_crop(line, color, color_mask, size):
+        scale = np.random.randint(280, 768)
+        line = cv.resize(line, (scale, scale))
+        color = cv.resize(color, (scale, scale))
+        color_mask = cv.resize(color_mask, (scale, scale))
+
         height, width = line.shape[0], line.shape[1]
         rnd0 = np.random.randint(height - size - 1)
         rnd1 = np.random.randint(width - size - 1)
@@ -369,19 +475,19 @@ class RefineDataset:
 
     # Hint preparation method
     @staticmethod
-    def _making_mask(mask, color, size=384):
+    def _making_mask(mask, color, size):
         choice = np.random.choice(['width', 'height', 'diag'])
 
         if choice == 'width':
             rnd_height = np.random.randint(8, 16)
-            rnd_width = np.random.randint(8, 128)
+            rnd_width = np.random.randint(8, 64)
 
             rnd1 = np.random.randint(size - rnd_height)
             rnd2 = np.random.randint(size - rnd_width)
             mask[rnd1:rnd1+rnd_height, rnd2:rnd2+rnd_width] = color[rnd1:rnd1+rnd_height, rnd2:rnd2+rnd_width]
 
         elif choice == 'height':
-            rnd_height = np.random.randint(8, 128)
+            rnd_height = np.random.randint(8, 64)
             rnd_width = np.random.randint(8, 16)
 
             rnd1 = np.random.randint(size - rnd_height)
@@ -390,7 +496,7 @@ class RefineDataset:
 
         elif choice == 'diag':
             rnd_height = np.random.randint(8, 16)
-            rnd_width = np.random.randint(8, 128)
+            rnd_width = np.random.randint(8, 64)
 
             rnd1 = np.random.randint(size - rnd_height - rnd_width - 1)
             rnd2 = np.random.randint(size - rnd_width)
@@ -402,20 +508,20 @@ class RefineDataset:
 
     # Simulation method
     def _overlap_crop(self, color, size):
-        color, _, _ = self._random_crop(color, color, color)
-        rnd1 = np.random.randint(220 - size)
-        rnd2 = np.random.randint(220 - size)
+        #color, _, _ = self._random_crop(color, color, color)
+        rnd1 = np.random.randint(500 - size)
+        rnd2 = np.random.randint(500 - size)
 
         return color[rnd1: rnd1 + size, rnd2: rnd2 + size]
 
     def _overlap(self, color, color_crop, size):
-        rnd1 = np.random.randint(self.size - size)
-        rnd2 = np.random.randint(self.size - size)
+        rnd1 = np.random.randint(500 - size)
+        rnd2 = np.random.randint(500 - size)
         color[rnd1: rnd1 + size, rnd2: rnd2 + size] = color_crop
 
         return color
 
-    def _making_overlap(self, color, size=224, iteration=7):
+    def _making_overlap(self, color, size, iteration=7):
         for _ in range(iteration):
             image_path = self.train[np.random.randint(self.train_len)]
             overlap_color = cv.imread(str(image_path))
@@ -463,15 +569,15 @@ class RefineDataset:
 
         return dominant_color
 
-    def _spray(self, color_img, iteration=2):
+    def _spray(self, color_img, iteration=2, eps=1e-8):
         # To get dominant color, conversion array to pillow object
         img_pillow = Image.fromarray(color_img)
         color = self._get_dominant_color(img_pillow)
 
         # To process this method, conversion pillow object to array
         img = np.array(color_img)
-        h = int(img.shape[0]/self.spray_split)
-        w = int(img.shape[1]/self.spray_split)
+        h = int(self.size/self.spray_split)
+        w = int(self.size/self.spray_split)
         a_x = np.random.randint(0, h)
         a_y = np.random.randint(0, w)
         b_x = np.random.randint(0, h)
@@ -495,8 +601,8 @@ class RefineDataset:
         for i in range(h):
             for j in range(w):
                 dis = self._min_dis([i, j], center_point_list)
-                paper[i, j, :] = np.array(color)/np.exp(lamda*dis)
-                mask[i, j] = np.array([255])/np.exp(lamda*dis)
+                paper[i, j, :] = np.array(color)/(np.exp(lamda*dis) + eps)
+                mask[i, j] = np.array([255])/(np.exp(lamda*dis) + eps)
 
         paper = (paper).astype('uint8')
         mask = (mask).astype('uint8')
@@ -523,31 +629,30 @@ class RefineDataset:
             image_path = self.train[np.random.randint(self.train_len)]
             st_img = cv.imread(str(image_path))
 
-        st_img = cv.resize(st_img, (self.size, self.size))
+        st_img = cv.resize(st_img, (self.img_size, self.img_size))
 
         return st_img
 
     def _simulate(self, image_path):
         st_img = self._spatial_transformer(image_path)
-        st_img = self._making_overlap(st_img, size=self.size, iteration=3)
+        st_img = self._making_overlap(st_img, size=self.img_size, iteration=3)
         st_img = self._spray(st_img)
 
         return st_img
 
-    def _prepare_pair(self, image_path, size=224):
+    def _prepare_pair(self, image_path, size):
         interpolation = random.choice(self.interpolations)
         color = cv.imread(str(image_path))
         line = self._preprocess(image_path)
-        line, color = self._random_resize(line, color)
         color_mask = self._simulate(image_path)
-        #line, color, color_mask = self._random_crop(line, color, color_mask, size=224)
+        line, color, color_mask = self._random_crop(line, color, color_mask, size=size)
 
         # Hint prepration
         mask = copy.copy(line)
         repeat = np.random.randint(8, 20)
         for _ in range(repeat):
-            mask = self._making_mask(mask, color, size=self.size)
-        mask_ds = cv.resize(mask, (int(self.size/2), int(self.size/2)), interpolation=interpolation)
+            mask = self._making_mask(mask, color, size=size)
+        mask_ds = cv.resize(mask, (int(size/2), int(size/2)), interpolation=interpolation)
 
         color = self._coordinate(color)
         color_mask = self._coordinate(color_mask)
@@ -603,7 +708,7 @@ class RefineDataset:
 
         return (line, mask, mask_ds)
 
-    def __call__(self, batchsize, mode='train', size=224):
+    def __call__(self, batchsize, mode='train'):
         color_box = []
         line_box = []
         mask_box = []
@@ -620,7 +725,7 @@ class RefineDataset:
             else:
                 raise AttributeError
 
-            color, line, mask, mask_ds, color_mask = self._prepare_pair(image_path, size=size)
+            color, line, mask, mask_ds, color_mask = self._prepare_pair(image_path, size=self.size)
 
             color_box.append(color)
             line_box.append(line)

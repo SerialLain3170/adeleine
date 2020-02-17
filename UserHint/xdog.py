@@ -54,6 +54,13 @@ def sketch_process(filename):
     img.save("test.png")
 
 
+def add_intensity(img, intensity=1.7):
+    const = 255.0 ** (1.0 - intensity)
+    img = (const * (img ** intensity))
+
+    return img
+
+
 def line_example_process(filename):
     img = cv.imread(filename)
     #img[img < 11] = 255
@@ -62,6 +69,8 @@ def line_example_process(filename):
     sigma = np.random.choice([0.3, 0.4, 0.5])
     img = xdog(img, sigma, 4.5, 19, 0.01, 10^9)
     img = img * 255
+    #img = cv.dilate(img, kernel=(5, 5), iterations=1)
+    img = add_intensity(img)
     img = img.reshape(img.shape[0], img.shape[1], 1)
     img = np.tile(img, (1, 1, 3))
 
@@ -69,8 +78,8 @@ def line_example_process(filename):
 
 
 if __name__ == "__main__":
-    img_path = "./job_kasyu.png"
-    sketch_process(img_path)
-    #img = line_example_process(img_path)
+    img_path = "./2.jpg"
+    #sketch_process(img_path)
+    img = line_example_process(img_path)
     #img[img < 200] = 0
-    #cv.imwrite("./0.png", img)
+    cv.imwrite("./0_intense.png", img)
