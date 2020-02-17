@@ -1,4 +1,4 @@
-# pix2pix + wasserstein metrics
+# pix2pix-gp
 
 ## Summary
 ![net](https://github.com/SerialLain3170/Colorization/blob/master/pix2pix-gp/net.png)
