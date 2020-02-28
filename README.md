@@ -34,6 +34,9 @@ I use three types of line art below.
   - Line extraction using Fully-Convolutional Networks. Lines obtained by Sketch Simplification are like digital drawings.
 
 Examples obtained by these line extraction methods are as follows.  
+
+![](https://github.com/SerialLain3170/Colorization/blob/master/Data/lineart.png)
+
 Moreover, I consider three types of data augmenation to line arts in order to avoid overfitting.
 
 - Adding intensity
@@ -74,7 +77,7 @@ Watching results of experiments above, even with using adversarial loss, it seem
 
 ### Results
 - UserHint
-![here](https://github.com/SerialLain3170/Line-to-Color/blob/master/UserHint/example.png)
+![here](https://github.com/SerialLain3170/Colorization/blob/master/UserHint/data/result2.png)
 
 ## Experiment with reference
 
@@ -86,4 +89,4 @@ I also consider taking the hint, reference, as input of neural network. First of
 
 ### Result
 - style2paints
-![here](https://github.com/SerialLain3170/Colorization/blob/master/style2paints/Result.png)
+![here](https://github.com/SerialLain3170/Colorization/blob/master/style2paints/data/res1.png)
