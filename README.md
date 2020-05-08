@@ -90,3 +90,10 @@ I also consider taking the hint, reference, as input of neural network. First of
 ### Result
 - style2paints
 ![here](https://github.com/SerialLain3170/Colorization/blob/master/style2paints/data/res1.png)
+
+## Experiment on video colorization
+
+### Result
+![](https://github.com/SerialLain3170/Colorization/blob/master/video/data/never_color1.gif)
+![](https://github.com/SerialLain3170/Colorization/blob/master/video/data/sakura1_color1.gif)
+![](https://github.com/SerialLain3170/Colorization/blob/master/video/data/rayearth1_color1.gif)
