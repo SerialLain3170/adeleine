@@ -61,6 +61,7 @@ First of all, I need to confirm that method based on neural networks can coloriz
 
 
 - pix2pix-gp
+
 ![here](https://github.com/SerialLain3170/Colorization/blob/master/pix2pix-gp/result.png)
 
 - pix2pixHD
