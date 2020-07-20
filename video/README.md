@@ -1,6 +1,13 @@
 # Video colorization with a few references
 
-Codes will be soon....
+I'm very busy doing other things. So I don't have time to do refactoring.  
+I hope I will push codes someday...Sorry.
+
+## Summary
+![](https://github.com/SerialLain3170/Colorization/blob/master/video/data/concept.png)
+
+- This implementation is based on [this paper](https://arxiv.org/pdf/2003.10685.pdf)
+- Given the first frame and the last frame of one scene, this model colorizes the rest.
 
 ## Result
 
