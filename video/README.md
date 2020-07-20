@@ -1,6 +1,6 @@
 # Video colorization with a few references
 
-I'm very busy doing other things. So I don't have time to do refactoring.  
+I'm very busy now. So I don't have time to do refactoring.  
 I hope I will push codes someday...Sorry.
 
 ## Summary
