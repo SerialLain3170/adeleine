@@ -87,10 +87,14 @@ I also consider taking the hint, reference, as input of neural network. First of
 
 ### Methods
 - [x] style2paints
+- [x] scft
 
 ### Result
 - style2paints
 ![here](https://github.com/SerialLain3170/Colorization/blob/master/style2paints/data/res1.png)
+
+- scft
+![](https://github.com/SerialLain3170/Colorization/blob/master/scft/data/result2.png)
 
 ## Experiment on video colorization
 
