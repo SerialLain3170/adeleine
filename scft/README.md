@@ -3,6 +3,7 @@
 ## Summary
 ![](https://github.com/SerialLain3170/Colorization/blob/master/scft/data/concept.png)
 
+- This implmentation is based on [this paper](https://arxiv.org/pdf/2005.05207.pdf)
 - Authors give sptially transformed images as reference images and color augmented images as target images
 
 ## Result
