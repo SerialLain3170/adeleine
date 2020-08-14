@@ -127,7 +127,7 @@ def warping_image(img, c_src, c_dst):
 
 
 if __name__ == "__main__":
-    img = cv.imread("/data/users/hasegawa/Dataset/face_getchu/a_face_getchu_95.png")
+    img = cv.imread("test.png")
     img = cv.resize(img, (128, 128))
 
     c_src = np.array([
