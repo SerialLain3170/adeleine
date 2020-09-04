@@ -53,7 +53,6 @@ First of all, I need to confirm that method based on neural networks can coloriz
 - [x] pix2pix-gp (pix2pix + zero-centered gradient penalty)
 - [x] pix2pixHD
 
-
 ### Results
 - pix2pix
 
