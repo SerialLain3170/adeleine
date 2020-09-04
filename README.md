@@ -56,16 +56,16 @@ First of all, I need to confirm that method based on neural networks can coloriz
 ### Results
 - pix2pix
 
-![pix2pix](https://github.com/SerialLain3170/Line-to-Color/blob/master/pix2pix/result.png)
+![pix2pix](https://github.com/SerialLain3170/Line-to-Color/blob/master/nohint_pix2pix/result.png)
 
 
 - pix2pix-gp
 
-![here](https://github.com/SerialLain3170/Colorization/blob/master/pix2pix-gp/result.png)
+![here](https://github.com/SerialLain3170/Colorization/blob/master/nohint_pix2pix_gp/result.png)
 
 - pix2pixHD
 
-![here](https://github.com/SerialLain3170/Line-to-Color/blob/master/pix2pixHD/visualize_125.png)
+![here](https://github.com/SerialLain3170/Line-to-Color/blob/master/nohint_pix2pixHD/visualize_125.png)
 
 ## Experiment with atari
 
@@ -73,11 +73,12 @@ First of all, I need to confirm that method based on neural networks can coloriz
 Watching results of experiments above, even with using adversarial loss, it seems that neural network falls local minimum. Some degrees of variations in color may exist, neural networks seem to learn to colorize single color to any regions in single character. I find it difficult to train mapping from line art to color image without hint. Therefore, I consider taking the hint, atari, as input of neural network.
 
 ### Methods
-- [x] UserHint
+- [x] userhint
+- [ ] gaugan
 
 ### Results
-- UserHint
-![here](https://github.com/SerialLain3170/Colorization/blob/master/UserHint/data/result2.png)
+- userhint
+![here](https://github.com/SerialLain3170/Colorization/blob/master/atari_userhint/data/result2.png)
 
 ## Experiment with reference
 
@@ -85,19 +86,18 @@ Watching results of experiments above, even with using adversarial loss, it seem
 I also consider taking the hint, reference, as input of neural network. First of all, I had tried to implement style2paints V1. However, I had difficulities producing the reproduction of results because training came to collapse. Then, I decide to seek for a substitute for style2paints V1.
 
 ### Methods
-- [x] style2paints
+- [x] adain
 - [x] scft
+- [ ] video
 
 ### Result
-- style2paints
-![here](https://github.com/SerialLain3170/Colorization/blob/master/style2paints/data/res1.png)
+- adain
+![here](https://github.com/SerialLain3170/Colorization/blob/master/reference_adain/data/res1.png)
 
 - scft
-![](https://github.com/SerialLain3170/Colorization/blob/master/scft/data/result2.png)
+![](https://github.com/SerialLain3170/Colorization/blob/master/reference_scft/data/result2.png)
 
-## Experiment on video colorization
-
-### Result
-![](https://github.com/SerialLain3170/Colorization/blob/master/video/data/never_color1.gif)
-![](https://github.com/SerialLain3170/Colorization/blob/master/video/data/sakura1_color1.gif)
-![](https://github.com/SerialLain3170/Colorization/blob/master/video/data/rayearth1_color1.gif)
+- video
+![](https://github.com/SerialLain3170/Colorization/blob/master/reference_video/data/never_color1.gif)
+![](https://github.com/SerialLain3170/Colorization/blob/master/reference_video/data/sakura1_color1.gif)
+![](https://github.com/SerialLain3170/Colorization/blob/master/reference_video/data/rayearth1_color1.gif)
