@@ -51,11 +51,16 @@ First of all, I need to confirm that method based on neural networks can coloriz
 ### Methods
 - [x] pix2pix
 - [x] pix2pixHD
+- [X] bicyclegan
 
 ### Results
 - pix2pix & pix2pixHD
 
 ![](./Data/nohint_comparison.png)
+
+- bicyclegan
+
+![](https://github.com/SerialLain3170/Colorization/blob/master/nohint_bicyclegan/data/result1.png)
 
 ## Experiment with atari
 
