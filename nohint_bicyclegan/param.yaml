@@ -1,0 +1,43 @@
+train:
+  epoch: 1000
+  snapshot_interval: 2000
+  batchsize: 16
+  validsize: 16
+  l_dim: 8
+
+dataset:
+  extension: ".png"
+  train_size: 256
+  valid_size: 256
+  color_space: "yuv"
+  line_space: "yuv"
+
+model:
+  generator:
+    in_ch: 3
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    l_dim: 8
+    num_layers: 4
+    mode: "train"
+  discriminator:
+    in_ch: 3
+    multi: 3
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    mode: "train"
+  encoder:
+    l_dim: 8
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    mode: "train"
+
+loss:
+  content: 10.0
+  latent: 0.5
+  adv: 1.0
+  kl: 0.01
+  ms: 1.0
