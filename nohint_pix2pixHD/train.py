@@ -1,224 +1,316 @@
-import chainer
-import chainer.functions as F
-import chainer.links as L
-from chainer import cuda,Chain,initializers,optimizers,serializers
-import numpy as np
-import os
+import yaml
+import torch
+import torch.nn as nn
 import argparse
-import pylab
-import requests
-from model import Global_Generator,Local_Enhancer,Discriminator,VGG
-from prepare import prepare_dataset_line,prepare_dataset_color
-import matplotlib
-matplotlib.use('Agg')
 
-xp=cuda.cupy
-cuda.get_device(0).use()
+from typing import List, Dict
+from pathlib import Path
+from tqdm import tqdm
+from model import LocalEnhancer, GlobalGenerator, Discriminator, down_sample, Vgg19
+from torch.utils.data import DataLoader
+from dataset import IllustDataset
+from visualize import Visualizer
 
-def set_optimizer(model,alpha=0.0002,beta=0.5):
-    optimizer=optimizers.Adam(alpha=alpha,beta1=beta)
-    optimizer.setup(model)
+maeloss = nn.L1Loss()
+mseloss = nn.MSELoss()
+softplus = nn.Softplus()
 
-    return optimizer
 
-def calc_loss(fake,real):
-    loss = 0
-    for f,r in zip(fake,real):
-        _,c,h,w=f.shape
-        loss+=F.mean_absolute_error(f,r) / (c*h*w)
+class Pix2pixHDCalculator:
+    def __init__(self):
+        pass
 
-    return loss
+    @staticmethod
+    def content_loss(y: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        return torch.mean(torch.abs(y - t))
 
-parser=argparse.ArgumentParser(description="pix2pixHD")
-parser.add_argument("--Ntrain",default=19000,type=int,help="the number of training images")
-parser.add_argument("--epochs",default=10000,type=int,help="the numbef of epochs")
-parser.add_argument("--batchsize",default=16,type=int,help="batch size")
-parser.add_argument("--testsize",default=2,type=int,help="test size")
-parser.add_argument("--weight",default=10.0,type=float,help="the weight of feature mathcing loss")
-parser.add_argument("--iterations",default=2000,type=int,help="the number of iteration")
+    @staticmethod
+    def feature_matching_loss(fake_feats: List[torch.Tensor],
+                              real_feats: List[torch.Tensor]) -> torch.Tensor:
+        sum_loss = 0
 
-args=parser.parse_args()
-Ntrain=args.Ntrain
-epochs=args.epochs
-batchsize=args.batchsize
-testsize=args.testsize
-weight=args.weight
-iterations=args.iterations
+        for y, t in zip(fake_feats, real_feats):
+            sum_loss += torch.mean(torch.abs(y-t))
 
-outdir="./output/"
-if not os.path.exists(outdir):
-    os.mkdir(outdir)
+        return sum_loss
 
-line_path="/line/"
-color_path="/color/"
-line_box = []
-color_box = []
-for index in range(testsize):
-    rnd = np.random.randint(Ntrain+1, Ntrain+ 400)
-    filename = "trim_free_" + str(rnd) + ".png"
-    line,rnd1,rnd2 = prepare_dataset_line(line_path + filename)
-    color = prepare_dataset_color(color_path + filename,rnd1,rnd2)
-    line_box.append(line)
-    color_box.append(color)
+    @staticmethod
+    def adversarial_disloss(y_list: List[torch.Tensor],
+                            t_list: List[torch.Tensor]) -> torch.Tensor:
+        sum_loss = 0
 
-line_test = xp.array(line_box).astype(xp.float32)
-line_test = chainer.as_variable(line_test)
-color_test = xp.array(color_box).astype(xp.float32)
-color_test = chainer.as_variable(color_test)
+        for y, t in zip(y_list, t_list):
+            loss = torch.mean(softplus(-t)) + torch.mean(softplus(y))
+            sum_loss += loss
 
-global_generator=Global_Generator()
-global_generator.to_gpu()
-gg_opt=set_optimizer(global_generator)
-serializers.load_npz("./global_generator_pretrain.model",global_generator)
+        return sum_loss
 
-local_enhancer=Local_Enhancer()
-local_enhancer.to_gpu()
-le_opt=set_optimizer(local_enhancer)
+    @staticmethod
+    def adversarial_genloss(y_list: List[torch.Tensor]) -> torch.Tensor:
+        sum_loss = 0
 
-discriminator=Discriminator()
-discriminator.to_gpu()
-dis_opt=set_optimizer(discriminator)
+        for y in y_list:
+            loss = torch.mean(softplus(-y))
+            sum_loss += loss
 
-discriminator_2=Discriminator()
-discriminator_2.to_gpu()
-dis2_opt=set_optimizer(discriminator_2)
+        return sum_loss
 
-discriminator_4=Discriminator()
-discriminator_4.to_gpu()
-dis4_opt=set_optimizer(discriminator_4)
+    @staticmethod
+    def adversarial_hingedis(y_list: List[torch.Tensor],
+                             t_list: List[torch.Tensor]) -> torch.Tensor:
+        sum_loss = 0
 
-#vgg=VGG()
-#vgg.to_gpu()
-#vgg_opt=set_optimizer(vgg)
-#vgg.base.disable_update()
+        for y, t in zip(y_list, t_list):
+            sum_loss += nn.ReLU()(1.0 + y).mean()
+            sum_loss += nn.ReLU()(1.0 - t).mean()
 
-for epoch in range(epochs):
-    if epoch <= 25:
-        global_generator.disable_update()
-    else:
-        global_generator.enable_update()
-    sum_gen_loss=0
-    sum_dis_loss=0
-    for batch in range(0,iterations,batchsize):
-        line_box=[]
-        color_box=[]
-        for index in range(batchsize):
-            rnd = np.random.randint(1,Ntrain)
-            filename = "trim_free_" + str(rnd) + ".png"
-            line,rnd1,rnd2 = prepare_dataset_line(line_path + filename)
-            color = prepare_dataset_color(color_path + filename,rnd1,rnd2)
-            line_box.append(line)
-            color_box.append(color)
+        return sum_loss
 
-        line=chainer.as_variable(xp.array(line_box).astype(xp.float32))
-        color=chainer.as_variable(xp.array(color_box).astype(xp.float32))
+    @staticmethod
+    def adversarial_hingegen(y_list: List[torch.Tensor]) -> torch.Tensor:
+        sum_loss = 0
 
-        color_2=F.average_pooling_2d(color,3,2,1)
-        color_4=F.average_pooling_2d(color_2,3,2,1)
+        for y in y_list:
+            sum_loss += -y.mean()
 
-        line_2=F.average_pooling_2d(line,3,2,1)
-        line_4=F.average_pooling_2d(line_2,3,2,1)
+        return sum_loss
 
-        _,gg=global_generator(line_2)
-        fake=local_enhancer(line,gg)
+    def dis_loss(self, discriminator: nn.Module,
+                 y: torch.Tensor,
+                 t: torch.Tensor) -> torch.Tensor:
 
-        fake_2=F.average_pooling_2d(fake,3,2,1)
-        fake_4=F.average_pooling_2d(fake_2,3,2,1)
+        _, y_outputs = discriminator(y)
+        _, t_outputs = discriminator(t)
 
-        dis_fake,_=discriminator(F.concat([fake,line]))
-        dis2_fake,_=discriminator_2(F.concat([fake_2,line_2]))
-        dis4_fake,_=discriminator_4(F.concat([fake_4,line_4]))
-        dis_color,_=discriminator(F.concat([color,line]))
-        dis2_color,_=discriminator_2(F.concat([color_2,line_2]))
-        dis4_color,_=discriminator_4(F.concat([color_4,line_4]))
+        return self.adversarial_hingedis(y_outputs, t_outputs)
 
-        fake.unchain_backward()
-        fake_2.unchain_backward()
-        fake_4.unchain_backward()
+    def gen_loss(self, discriminator: nn.Module,
+                 y: torch.Tensor,
+                 t: torch.Tensor) -> (torch.Tensor, torch.Tensor):
 
-        adver_loss=F.mean(F.softplus(-dis_color)) + F.mean(F.softplus(dis_fake))
-        adver_loss+=F.mean(F.softplus(-dis2_color)) + F.mean(F.softplus(dis2_fake))
-        adver_loss+=F.mean(F.softplus(-dis4_color)) + F.mean(F.softplus(dis4_fake))
+        y_feats, y_outputs = discriminator(y)
+        t_feats, _ = discriminator(t)
 
-        discriminator.cleargrads()
-        discriminator_2.cleargrads()
-        discriminator_4.cleargrads()
-        discriminator.to_gpu()
-        adver_loss.backward()
-        dis_opt.update()
-        dis2_opt.update()
-        dis4_opt.update()
-        adver_loss.unchain_backward()
+        adv_loss = self.adversarial_hingegen(y_outputs)
+        fm_loss = self.feature_matching_loss(y_feats, t_feats)
 
-        _,gg=global_generator(line_2)
-        fake=local_enhancer(line,gg)
-        fake_2=F.average_pooling_2d(fake,3,2,1)
-        fake_4=F.average_pooling_2d(fake_2,3,2,1)
+        return adv_loss, fm_loss
 
-        dis_fake,fake_feat=discriminator(F.concat([fake,line]))
-        dis2_fake,fake_feat2=discriminator_2(F.concat([fake_2,line_2]))
-        dis4_fake,fake_feat3=discriminator_4(F.concat([fake_4,line_4]))
-        dis_color,real_feat=discriminator(F.concat([color,line]))
-        dis2_color,real_feat2=discriminator_2(F.concat([color_2,line_2]))
-        dis4_color,real_feat3=discriminator_4(F.concat([color_4,line_4]))
+    @staticmethod
+    def perceptual_loss(vgg: nn.Module,
+                        y: torch.Tensor,
+                        t: torch.Tensor) -> torch.Tensor:
+        sum_loss = 0
+        y_feat = vgg(y)
+        t_feat = vgg(t)
 
-        gen_loss=F.mean(F.softplus(-dis_fake))
-        gen_loss+=F.mean(F.softplus(-dis2_fake))
-        gen_loss+=F.mean(F.softplus(-dis4_fake))
+        for y, t in zip(y_feat, t_feat):
+            _, c, h, w = y.size()
+            sum_loss += torch.mean(torch.abs(y-t)) / (c * h * w)
 
-        feat_loss=calc_loss(real_feat,fake_feat)
-        feat_loss+=calc_loss(real_feat2,fake_feat2)
-        feat_loss+=calc_loss(real_feat3,fake_feat3)
+        return sum_loss
 
-        #perc_fake=vgg(fake)
-        #perc_color=vgg(color)
-        #percep_loss=calc_loss(perc_fake,perc_color)
 
-        content_loss=F.mean_absolute_error(color,fake)
-        content_loss+=F.mean_absolute_error(color_2,fake_2)
-        content_loss+=F.mean_absolute_error(color_4,fake_4)
+class Trainer:
+    def __init__(self,
+                 config,
+                 outdir,
+                 modeldir,
+                 data_path,
+                 sketch_path,
+                 ):
 
-        gen_loss+=weight * (feat_loss+content_loss)
+        self.train_config = config["train"]
+        self.data_config = config["dataset"]
+        model_config = config["model"]
+        self.loss_config = config["loss"]
 
-        global_generator.cleargrads()
-        local_enhancer.cleargrads()
-        #vgg.cleargrads()
-        gen_loss.backward()
-        gg_opt.update()
-        le_opt.update()
-        #vgg_opt.update()
-        gen_loss.unchain_backward()
+        self.outdir = outdir
+        self.modeldir = modeldir
+        self.mask = self.train_config["mask"]
 
-        sum_dis_loss+=adver_loss.data.get()
-        sum_gen_loss+=gen_loss.data.get()
+        self.dataset = IllustDataset(data_path,
+                                     sketch_path,
+                                     self.data_config["extension"],
+                                     self.data_config["train_size"],
+                                     self.data_config["valid_size"],
+                                     self.data_config["color_space"],
+                                     self.data_config["line_space"])
+        print(self.dataset)
 
-        if batch==0:
-            serializers.save_npz("global_generator",global_generator)
-            serializers.save_npz("local_enhancer",local_enhancer)
-            with chainer.using_config("train", False):
-                line_test_2=F.average_pooling_2d(line_test,(2,2))
-                _,gg=global_generator(line_test_2)
-                y = local_enhancer(line_test,gg)
-            y = y.data.get()
-            sr = line_test.data.get()
-            cr = color_test.data.get()
-            for i_ in range(testsize):
-                tmp = (np.clip((sr[i_,:,:,:])*127.5 + 127.5, 0, 255)).transpose(1,2,0).astype(np.uint8)
-                pylab.subplot(testsize,3,3*i_+1)
-                pylab.imshow(tmp)
-                pylab.axis('off')
-                pylab.savefig('%s/visualize_%d.png'%(outdir, epoch))
-                tmp = (np.clip((cr[i_,:,:,:])*127.5 + 127.5, 0, 255)).transpose(1,2,0).astype(np.uint8)
-                pylab.subplot(testsize,3,3*i_+2)
-                pylab.imshow(tmp)
-                pylab.axis('off')
-                pylab.savefig('%s/visualize_%d.png'%(outdir, epoch))
-                tmp = (np.clip((y[i_,:,:,:])*127.5 + 127.5, 0, 255)).transpose(1,2,0).astype(np.uint8)
-                pylab.subplot(testsize,3,3*i_+3)
-                pylab.imshow(tmp)
-                pylab.axis('off')
-                pylab.savefig('%s/visualize_%d.png'%(outdir, epoch))
+        if self.mask:
+            in_ch = 6
+        else:
+            in_ch = 3
 
-    print("epoch:{}".format(epoch))
-    print("Discriminator loss:{}".format(sum_dis_loss/iterations))
-    print("Generator loss:{}".format(sum_gen_loss/iterations))
+        loc_gen = LocalEnhancer(in_ch=in_ch,
+                                num_layers=model_config["local_enhancer"]["num_layers"])
+        self.loc_gen, self.loc_gen_opt = self._setting_model_optim(loc_gen,
+                                                                   model_config["local_enhancer"])
+
+        glo_gen = GlobalGenerator(in_ch=in_ch)
+        self.glo_gen, self.glo_gen_opt = self._setting_model_optim(glo_gen,
+                                                                   model_config["global_generator"])
+
+        dis = Discriminator(model_config["discriminator"]["in_ch"],
+                            model_config["discriminator"]["multi"])
+        self.dis, self.dis_opt = self._setting_model_optim(dis,
+                                                           model_config["discriminator"])
+
+        self.vgg = Vgg19(requires_grad=False)
+        self.vgg.cuda()
+        self.vgg.eval()
+
+        self.lossfunc = Pix2pixHDCalculator()
+        self.visualizer = Visualizer(self.data_config["color_space"])
+
+    @staticmethod
+    def _setting_model_optim(model: nn.Module,
+                             config: Dict):
+        model.cuda()
+        if config["mode"] == "train":
+            model.train()
+        elif config["mode"] == "eval":
+            model.eval()
+
+        optimizer = torch.optim.Adam(model.parameters(),
+                                     lr=config["lr"],
+                                     betas=(config["b1"], config["b2"]))
+
+        return model, optimizer
+
+    @staticmethod
+    def _valid_prepare(dataset, validsize: int, mask: bool) -> List[torch.Tensor]:
+        c_val, l_val, m_val = dataset.valid(validsize)
+
+        if mask:
+            x_val = torch.cat([l_val, m_val], dim=1)
+        else:
+            x_val = l_val
+
+        return [x_val, l_val, m_val, c_val]
+
+    def _eval(self,
+			  iteration: int,
+			  validsize: int,
+			  v_list: List[torch.Tensor],
+			  pretrain: bool):
+
+        torch.save(self.loc_gen.state_dict(),
+                   f"{self.modeldir}/local_enhancer_{iteration}.pt")
+        torch.save(self.glo_gen.state_dict(),
+                   f"{self.modeldir}/global_generator_{iteration}.pt")
+
+        with torch.no_grad():
+            if pretrain:
+                y = self.loc_gen(v_list[0], pretrain)
+            else:
+                le = self.loc_gen(v_list[0], pretrain)
+                y = self.glo_gen(v_list[0], le)
+
+        self.visualizer(v_list[1:], y,
+                        self.outdir, iteration, validsize)
+
+    def _iter(self, data, pretrain: int, epoch: int):
+        color, line, mask = data
+        color = color.cuda()
+        line = line.cuda()
+        mask = mask.cuda()
+
+        if self.mask:
+            x = torch.cat([line, mask], dim=1)
+            t_cat = torch.cat([mask, color], dim=1)
+        else:
+            x = line
+            t_cat = torch.cat([line, color], dim=1)
+
+        if pretrain > epoch:
+            y = self.loc_gen(x, pretrain > epoch)
+
+            if self.mask:
+                hint = down_sample(mask)
+            else:
+                hint = down_sample(line)
+            t_cat = down_sample(t_cat)
+        else:
+            le = self.loc_gen(x, pretrain > epoch)
+            y = self.glo_gen(x, le)
+
+        y_cat = torch.cat([hint, y], dim=1)
+
+        # discriminate images themselve
+        loss = self.loss_config["adv"] * self.lossfunc.dis_loss(self.dis,
+                                                                y_cat.detach(),
+                                                                t_cat)
+
+        self.dis_opt.zero_grad()
+        loss.backward()
+        self.dis_opt.step()
+
+        adv_loss, fm_loss = self.lossfunc.gen_loss(self.dis,
+                                                   y_cat,
+                                                   t_cat)
+
+        # gray scale
+        loss = self.loss_config["fm"] * fm_loss + self.loss_config["adv"] * adv_loss
+        loss += self.loss_config["content"] * self.lossfunc.content_loss(y_cat[:, 3:6, :, :],
+                                                                         t_cat[:, 3:6, :, :])
+        loss += self.loss_config["perceptual"] * self.lossfunc.perceptual_loss(self.vgg,
+                                                                               y_cat[:, 3:6, :, :],
+                                                                               t_cat[:, 3:6, :, :])
+
+        self.loc_gen_opt.zero_grad()
+        self.glo_gen_opt.zero_grad()
+        loss.backward()
+        self.loc_gen_opt.step()
+        self.glo_gen_opt.step()
+
+    def __call__(self):
+        iteration = 0
+        v_list = self._valid_prepare(self.dataset,
+                                     self.train_config["validsize"],
+                                     self.mask)
+        pretrain = self.train_config["pretrain"]
+
+        for epoch in range(self.train_config["epoch"]):
+            dataloader = DataLoader(self.dataset,
+                                    batch_size=self.train_config["batchsize"],
+                                    shuffle=True,
+                                    drop_last=True)
+            progress_bar = tqdm(dataloader)
+
+            for index, data in enumerate(progress_bar):
+                iteration += 1
+                self._iter(data, pretrain, epoch)
+
+                if iteration % self.train_config["snapshot_interval"] == 1:
+                    self._eval(iteration,
+                               self.train_config["validsize"],
+                               v_list,
+                               pretrain > epoch)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Style2Paint")
+    parser.add_argument('--outdir', type=Path, default='outdir', help="output directory")
+    parser.add_argument('--modeldir', type=Path, default='modeldir', help="model output directory")
+    parser.add_argument('--data_path', type=Path, help="path containing color images")
+    parser.add_argument('--sketch_path', type=Path, help="path containing sketch images")
+    args = parser.parse_args()
+
+    outdir = args.outdir
+    outdir.mkdir(exist_ok=True)
+
+    modeldir = args.modeldir
+    modeldir.mkdir(exist_ok=True)
+
+    with open("param.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    trainer = Trainer(config,
+                      outdir,
+                      modeldir,
+                      args.data_path,
+                      args.sketch_path,
+                      )
+    trainer()
