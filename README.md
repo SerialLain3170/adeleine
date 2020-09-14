@@ -50,22 +50,12 @@ First of all, I need to confirm that method based on neural networks can coloriz
 
 ### Methods
 - [x] pix2pix
-- [x] pix2pix-gp (pix2pix + zero-centered gradient penalty)
 - [x] pix2pixHD
 
 ### Results
-- pix2pix
+- pix2pix & pix2pixHD
 
-![pix2pix](https://github.com/SerialLain3170/Line-to-Color/blob/master/nohint_pix2pix/result.png)
-
-
-- pix2pix-gp
-
-![here](https://github.com/SerialLain3170/Colorization/blob/master/nohint_pix2pix_gp/result.png)
-
-- pix2pixHD
-
-![here](https://github.com/SerialLain3170/Line-to-Color/blob/master/nohint_pix2pixHD/visualize_125.png)
+![](./Data/nohint_comparison.png)
 
 ## Experiment with atari
 
