@@ -1,141 +1,251 @@
-import chainer
-import chainer.functions as F
-import chainer.links as L
+import yaml
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.autograd as autograd
 import argparse
 
+from typing import List, Dict
 from pathlib import Path
-from chainer import cuda, serializers
-from model import UNet, Discriminator
-from dataset import DatasetLoader
-from utils import set_optimizer
+from tqdm import tqdm
+from model import Generator, Discriminator
+from torch.utils.data import DataLoader
+from dataset import IllustDataset
 from visualize import Visualizer
+from torch.autograd import Variable
 
-xp = cuda.cupy
+maeloss = nn.L1Loss()
+mseloss = nn.MSELoss()
+softplus = nn.Softplus()
 
 
-class Pix2pixLossCalculator:
+class Pix2pixCalculator:
 	def __init__(self):
 		pass
 
 	@staticmethod
-	def dis_loss(discriminator, y, t):
-		y_dis = discriminator(y)
-		t_dis = discriminator(t)
-
-		return F.mean(F.softplus(-t_dis)) + F.mean(F.softplus(y_dis))
+	def content_loss(y: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+		return torch.mean(torch.abs(y - t))
 
 	@staticmethod
-	def gen_loss(discriminator, y):
-		y_dis = discriminator(y)
+	def adversarial_disloss(discriminator: nn.Module,
+							y: torch.Tensor,
+							t: torch.Tensor) -> torch.Tensor:
+		fake = discriminator(y)
+		real = discriminator(t)
 
-		return F.mean(F.softplus(-y_dis))
+		loss = torch.mean(softplus(-real)) + torch.mean(softplus(fake))
+
+		return loss
 
 	@staticmethod
-	def content_loss(y, t):
-		return 10.0 * F.mean_absolute_error(y, t)
+	def adversarial_genloss(discriminator: nn.Module,
+							y: torch.Tensor) -> torch.Tensor:
+
+		fake = discriminator(y)
+		loss = torch.mean(softplus(-fake))
+
+		return loss
+
+	@staticmethod
+	def adversarial_hingedis(discriminator: nn.Module,
+							 y: torch.Tensor,
+							 t: torch.Tensor) -> torch.Tensor:
+
+		fake = discriminator(y)
+		real = discriminator(t)
+
+		loss = nn.ReLU()(1.0 + fake).mean()
+		loss += nn.ReLU()(1.0 - real).mean()
+
+		return loss
+
+	@staticmethod
+	def adversarial_hingegen(discriminator: nn.Module,
+							 y: torch.Tensor) -> torch.Tensor:
+
+		fake = discriminator(y)
+		loss = -fake.mean()
+
+		return loss
+
+	@staticmethod
+	def gradient_penalty(discriminator: nn.Module,
+						 t: torch.Tensor,
+						 center="zero") -> torch.Tensor:
+
+		alpha = torch.cuda.FloatTensor(np.random.random(size=t.shape))
+		epsilon = torch.rand(t.size()).cuda()
+		interpolates = alpha * t + ((1 - alpha) * (t + 0.5 * t.std() * epsilon))
+		interpolates = Variable(interpolates, requires_grad=True)
+
+		d_interpolates = discriminator(interpolates)
+
+		fake = Variable(torch.cuda.FloatTensor(t.shape[0], 1, 8, 8).fill_(1.0), requires_grad=False)
+
+		gradients = autograd.grad(
+			outputs=d_interpolates,
+			inputs=interpolates,
+			grad_outputs=fake,
+			create_graph=True,
+			retain_graph=True,
+			only_inputs=True,
+		)[0]
+
+		if center == "one":
+			gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+		elif center == "zero":
+			gradient_penalty = ((gradients.norm(2, dim=1)) ** 2).mean()
+
+		return gradient_penalty
 
 
-def train(epochs,
-		  iterations,
-		  batchsize,
-		  validsize,
-		  outdir,
-		  modeldir,
-		  extension,
-		  train_size,
-		  valid_size,
-		  data_path,
-		  sketch_path,
-		  digi_path,
-		  learning_rate,
-		  beta1,
-		  weight_decay):
+class Trainer:
+	def __init__(self,
+				 config,
+				 outdir,
+				 modeldir,
+				 data_path,
+				 sketch_path,
+				 ):
 
-	# Dataset definition
-	dataset = DatasetLoader(data_path, sketch_path, digi_path,
-							extension, train_size, valid_size)
-	print(dataset)
-	x_val, t_val = dataset.valid(validsize)
+		self.train_config = config["train"]
+		self.data_config = config["dataset"]
+		model_config = config["model"]
+		self.loss_config = config["loss"]
 
-	# Model & Optimizer definition
-	unet = UNet()
-	unet.to_gpu()
-	unet_opt = set_optimizer(unet, learning_rate, beta1, weight_decay)
+		self.outdir = outdir
+		self.modeldir = modeldir
+		self.mask = self.train_config["mask"]
 
-	discriminator = Discriminator()
-	discriminator.to_gpu()
-	dis_opt = set_optimizer(discriminator, learning_rate, beta1, weight_decay)
+		self.dataset = IllustDataset(data_path,
+									sketch_path,
+									self.data_config["extension"],
+									self.data_config["train_size"],
+									self.data_config["valid_size"],
+									self.data_config["color_space"],
+									self.data_config["line_space"])
+		print(self.dataset)
 
-	# Loss function definition
-	lossfunc = Pix2pixLossCalculator()
+		if self.mask:
+			in_ch = 6
+		else:
+			in_ch = 3
 
-	# Visualization definition
-	visualizer = Visualizer()
+		gen = Generator(in_ch=in_ch)
+		self.gen, self.gen_opt = self._setting_model_optim(gen,
+														   model_config["generator"])
 
-	for epoch in range(epochs):
-		sum_dis_loss = 0
-		sum_gen_loss = 0
-		for batch in range(0, iterations, batchsize):
-			x, t = dataset.train(batchsize)
+		dis = Discriminator()
+		self.dis, self.dis_opt = self._setting_model_optim(dis,
+														   model_config["discriminator"])
 
-			# Discriminator update
-			y = unet(x)
-			y.unchain_backward()
+		self.lossfunc = Pix2pixCalculator()
+		self.visualizer = Visualizer(self.data_config["color_space"])
 
-			dis_loss = lossfunc.dis_loss(discriminator, y, t)
+	@staticmethod
+	def _setting_model_optim(model: nn.Module,
+							config: Dict):
+		model.cuda()
+		if config["mode"] == "train":
+			model.train()
+		elif config["mode"] == "eval":
+			model.eval()
 
-			discriminator.cleargrads()
-			dis_loss.backward()
-			dis_opt.update()
+		optimizer = torch.optim.Adam(model.parameters(),
+									lr=config["lr"],
+									betas=(config["b1"], config["b2"]))
 
-			sum_dis_loss += dis_loss.data
+		return model, optimizer
 
-			# Generator update
-			y = unet(x)
+	@staticmethod
+	def _valid_prepare(dataset, validsize: int, mask: bool) -> List[torch.Tensor]:
+		c_val, l_val, m_val = dataset.valid(validsize)
 
-			gen_loss = lossfunc.gen_loss(discriminator, y)
-			gen_loss += lossfunc.content_loss(y, t)
+		if mask:
+			x_val = torch.cat([l_val, m_val], dim=1)
+		else:
+			x_val = l_val
 
-			unet.cleargrads()
-			gen_loss.backward()
-			unet_opt.update()
+		return [x_val, l_val, m_val, c_val]
 
-			sum_gen_loss += gen_loss.data
+	def _eval(self,
+			  iteration: int,
+			  validsize: int,
+			  v_list: List[torch.Tensor]):
+		torch.save(self.gen.state_dict(),
+				   f"{self.modeldir}/model_{iteration}.pt")
 
-			if batch == 0:
-				serializers.save_npz(f"{modeldir}/unet_{epoch}.model", unet)
+		with torch.no_grad():
+			y = self.gen(v_list[0])
 
-				with chainer.using_config("train", False):
-					y = unet(x_val)
+		self.visualizer(v_list[1:], y,
+						self.outdir, iteration, validsize)
 
-				x = x_val.data.get()
-				t = t_val.data.get()
-				y = y.data.get()
+	def _iter(self, data):
+		color, line, mask = data
+		color = color.cuda()
+		line = line.cuda()
+		mask = mask.cuda()
 
-				visualizer(x, t, y, outdir, epoch, validsize)
+		if self.mask:
+			y = self.gen(torch.cat([line, mask], dim=1))
+		else:
+			y = self.gen(line)
 
-		print(f"epoch: {epoch}")
-		print(f"dis loss: {sum_dis_loss/iterations} gen loss: {sum_gen_loss/iterations}")
+		# discriminate images themselve
+		loss = self.loss_config["adv"] * self.lossfunc.adversarial_hingedis(self.dis,
+																y.detach(),
+																color)
+		loss += self.loss_config["gp"] * self.lossfunc.gradient_penalty(self.dis,
+																		color,
+																		center=self.loss_config["center"])
+
+		self.dis_opt.zero_grad()
+		loss.backward()
+		self.dis_opt.step()
+
+		loss = self.loss_config["adv"] * self.lossfunc.adversarial_hingegen(self.dis,
+																y)
+
+		# gray scale
+		loss += self.loss_config["content"] * self.lossfunc.content_loss(y,
+																		color)
+
+		self.gen_opt.zero_grad()
+		loss.backward()
+		self.gen_opt.step()
+
+	def __call__(self):
+		iteration = 0
+		v_list = self._valid_prepare(self.dataset,
+									 self.train_config["validsize"],
+									 self.mask)
+
+		for epoch in range(self.train_config["epoch"]):
+			dataloader = DataLoader(self.dataset,
+									batch_size=self.train_config["batchsize"],
+									shuffle=True,
+									drop_last=True)
+			progress_bar = tqdm(dataloader)
+
+			for index, data in enumerate(progress_bar):
+				iteration += 1
+				self._iter(data)
+
+				if iteration % self.train_config["snapshot_interval"] == 1:
+					self._eval(iteration,
+							   self.train_config["validsize"],
+							   v_list,
+							   )
 
 
 if __name__ == "__main__":
-	parser = argparse.ArgumentParser(description="pix2pix")
-	parser.add_argument("--e", type=int, default=1000, help="the number of epochs")
-	parser.add_argument("--i", type=int, default=20000, help="the number of iterations")
-	parser.add_argument("--b", type=int, default=16, help="batch size")
-	parser.add_argument("--v", type=int, default=12, help="valid size")
-	parser.add_argument("--outdir", type=Path, default='outdir', help="output directory")
-	parser.add_argument("--modeldir", type=Path, default='modeldir', help="model output directory")
-	parser.add_argument("--ext", type=str, default=".jpg", help="extension of training images")
-	parser.add_argument("--ts", type=int, default=128, help="size of training images")
-	parser.add_argument("--vs", type=int, default=512, help="size of validation images")
-	parser.add_argument("--lr", type=float, default=0.0002, help="alpha of Adam")
-	parser.add_argument("--b1", type=float, default=0.5, help="beta1 of Adam")
-	parser.add_argument("--wd", type=float, default=0.00001, help="weight decay of optimizer")
-	parser.add_argument("--data_path", type=Path, help="path which contains color images")
-	parser.add_argument("--sketch_path", type=Path, help="path which contains sketch images")
-	parser.add_argument("--digi_path", type=Path, help="path which contains digital images")
+	parser = argparse.ArgumentParser(description="Style2Paint")
+	parser.add_argument('--outdir', type=Path, default='outdir', help="output directory")
+	parser.add_argument('--modeldir', type=Path, default='modeldir', help="model output directory")
+	parser.add_argument('--data_path', type=Path, help="path containing color images")
+	parser.add_argument('--sketch_path', type=Path, help="path containing sketch images")
 	args = parser.parse_args()
 
 	outdir = args.outdir
@@ -144,5 +254,13 @@ if __name__ == "__main__":
 	modeldir = args.modeldir
 	modeldir.mkdir(exist_ok=True)
 
-	train(args.e, args.i, args.b, args.v, outdir, modeldir, args.ext, args.ts, args.vs,
-		  args.data_path, args.sketch_path, args.digi_path, args.lr, args.b1, args.wd)
+	with open("param.yaml", "r") as f:
+		config = yaml.safe_load(f)
+
+	trainer = Trainer(config,
+					  outdir,
+					  modeldir,
+					  args.data_path,
+					  args.sketch_path,
+					  )
+	trainer()

@@ -1,135 +1,73 @@
+import torch
 import numpy as np
-import random
 import cv2 as cv
 import copy
-import chainer
-import chainer.functions as F
 
-from xdog import xdog_process
-from chainer import cuda
+from typing import List
+from torch.utils.data import Dataset
 from pathlib import Path
-from PIL import Image
-
-xp = cuda.cupy
-cuda.get_device(0).use()
+from hint_processor import LineProcessor
 
 
-class DatasetLoader:
+class IllustDataset(Dataset):
     def __init__(self,
                  data_path: Path,
                  sketch_path: Path,
-                 digi_path: Path,
-                 extension='.jpg',
-                 train_size=128,
-                 valid_size=512):
+                 extension=".jpg",
+                 train_size=224,
+                 valid_size=256,
+                 color_space="rgb",
+                 line_space="rgb"):
 
         self.data_path = data_path
-        self.skecth_path = sketch_path
-        self.digi_path = digi_path
-        self.extension = extension
-        self.train_size = train_size
-        self.valid_size = valid_size
-
-        self.interpolations = (
-            cv.INTER_LINEAR,
-            cv.INTER_AREA,
-            cv.INTER_NEAREST,
-            cv.INTER_CUBIC,
-            cv.INTER_LANCZOS4
-        )
-
         self.pathlist = list(self.data_path.glob(f"**/*{extension}"))
         self.train_list, self.val_list = self._train_val_split(self.pathlist)
         self.train_len = len(self.train_list)
 
-    def __str__(self):
-        return f"dataset path: {self.data_path} train data: {self.train_len}"
+        self.sketch_path = sketch_path
 
-    # Initialization method
-    def _train_val_split(self, pathlist: list):
-        split_point = int(len(self.pathlist) * 0.95)
-        x_train = self.pathlist[:split_point]
-        x_test = self.pathlist[split_point:]
+        self.train_size = train_size
+        self.valid_size = valid_size
 
-        return x_train, x_test
-
-    # Line art preparation method
-    @staticmethod
-    def _add_intensity(img, intensity=1.7):
-        const = 255.0 ** (1.0 - intensity)
-        img = (const * (img ** intensity))
-
-        return img
+        self.line_process = LineProcessor(sketch_path)
+        self.color_space = color_space
+        self.line_space = line_space
 
     @staticmethod
-    def _morphology(img):
-        method = np.random.choice(["dilate", "erode"])
-        if method == "dilate":
-            img = cv.dilate(img, (5, 5), iterations=1)
-        elif method == "erode":
-            img = cv.erode(img, (5, 5), iterations=1)
+    def _train_val_split(pathlist: List) -> (List, List):
+        split_point = int(len(pathlist) * 0.95)
+        train = pathlist[:split_point]
+        val = pathlist[split_point:]
+
+        return train, val
+
+    @staticmethod
+    def _coordinate(img: np.array,
+                    color_space: str) -> np.array:
+        if color_space == "yuv":
+            img = img.astype(np.uint8)
+            img = cv.cvtColor(img, cv.COLOR_BGR2YCrCb)
+            img = img.transpose(2, 0, 1).astype(np.float32)
+            img = (img - 127.5) / 127.5
+        elif color_space == "gray":
+            img = img.astype(np.uint8)
+            img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+            img = np.expand_dims(img, axis=0).astype(np.float32)
+            img = (img - 127.5) / 127.5
+        else:
+            img = img[:, :, ::-1].astype(np.float32)
+            img = (img.transpose(2, 0, 1) - 127.5) / 127.5
 
         return img
 
     @staticmethod
-    def _color_variant(img, max_value=30):
-        color = np.random.randint(max_value + 1)
-        img[img < 200] = color
+    def _totensor(array_list: List) -> torch.Tensor:
+        return torch.cuda.FloatTensor(np.array(array_list).astype(np.float32))
 
-        return img
-
-    def _detail_preprocess(self, img):
-        intensity = np.random.randint(2)
-        morphology = np.random.randint(2)
-        color_variance = np.random.randint(2)
-
-        if intensity:
-            img = self._add_intensity(img)
-        if morphology:
-            img = self._morphology(img)
-        if color_variance:
-            img = self._color_variant(img)
-
-        return img
-
-    def _xdog_preprocess(self, path):
-        img = xdog_process(str(path))
-        img = (img * 255.0).reshape(img.shape[0], img.shape[1], 1)
-        img = np.tile(img, (1, 1, 3))
-
-        return img
-
-    def _pencil_preprocess(self, path):
-        filename = path.name
-        line_path = self.skecth_path / Path(filename)
-        img = cv.imread(str(line_path))
-
-        return img
-
-    def _digital_preprocess(self, path):
-        filename = path.name
-        line_path = self.digi_path / Path(filename)
-        img = cv.imread(str(line_path))
-
-        return img
-
-    def _preprocess(self, path):
-        method = np.random.choice(["xdog", "pencil", "digital"])
-
-        if method == "xdog":
-            img = self._xdog_preprocess(path)
-        elif method == "pencil":
-            img = self._pencil_preprocess(path)
-        elif method == "digital":
-            img = self._digital_preprocess(path)
-
-        img = self._detail_preprocess(img)
-
-        return img
-
-    # Preprocess method
     @staticmethod
-    def _random_crop(line, color, size):
+    def _random_crop(line: np.array,
+                     color: np.array,
+                     size: int) -> (np.array, np.array):
         scale = np.random.randint(288, 768)
         line = cv.resize(line, (scale, scale))
         color = cv.resize(color, (scale, scale))
@@ -143,61 +81,177 @@ class DatasetLoader:
 
         return line, color
 
+    # Hint preparation method
     @staticmethod
-    def _coordinate(image):
-        image = image[:, :, ::-1]
-        image = image.transpose(2, 0, 1)
-        image = (image - 127.5) / 127.5
+    def _making_mask(mask: np.array,
+                     color: np.array,
+                     size: int) -> np.array:
+        choice = np.random.choice(['width', 'height', 'diag'])
 
-        return image
+        if choice == 'width':
+            rnd_height = np.random.randint(4, 8)
+            rnd_width = np.random.randint(4, 64)
+
+            rnd1 = np.random.randint(size - rnd_height)
+            rnd2 = np.random.randint(size - rnd_width)
+            mask[rnd1:rnd1+rnd_height, rnd2:rnd2+rnd_width] = color[rnd1:rnd1+rnd_height, rnd2:rnd2+rnd_width]
+
+        elif choice == 'height':
+            rnd_height = np.random.randint(4, 64)
+            rnd_width = np.random.randint(4, 8)
+
+            rnd1 = np.random.randint(size - rnd_height)
+            rnd2 = np.random.randint(size - rnd_width)
+            mask[rnd1:rnd1+rnd_height, rnd2:rnd2+rnd_width] = color[rnd1:rnd1+rnd_height, rnd2:rnd2+rnd_width]
+
+        elif choice == 'diag':
+            rnd_height = np.random.randint(4, 8)
+            rnd_width = np.random.randint(4, 64)
+
+            rnd1 = np.random.randint(size - rnd_height - rnd_width - 1)
+            rnd2 = np.random.randint(size - rnd_width)
+
+            for index in range(rnd_width):
+                mask[rnd1 + index: rnd1 + rnd_height + index, rnd2 + index] = color[rnd1 + index: rnd1 + rnd_height + index, rnd2 + index]
+
+        return mask
+
+    def _preprocess(self,
+                    color: np.array,
+                    line: np.array,
+                    size: int):
+        line, color = self._random_crop(line, color, size=size)
+
+        # Hint preparation
+        mask = copy.copy(line)
+        repeat = np.random.randint(8, 20)
+        for _ in range(repeat):
+            mask = self._making_mask(mask, color, size=size)
+
+        return (color, line, mask)
+
+    def valid(self, validsize: int):
+        c_valid_box = []
+        l_valid_box = []
+        m_valid_box = []
+
+        for index in range(validsize):
+            color_path = self.val_list[index]
+            color = cv.imread(str(color_path))
+            line = self.line_process(color_path)
+
+            color, line, mask = self._preprocess(color,
+                                                 line,
+                                                 size=self.valid_size)
+
+            color = self._coordinate(color, self.color_space)
+            line = self._coordinate(line, self.line_space)
+            mask = self._coordinate(mask, self.color_space)
+
+            c_valid_box.append(color)
+            l_valid_box.append(line)
+            m_valid_box.append(mask)
+
+        color = self._totensor(c_valid_box)
+        line = self._totensor(l_valid_box)
+        mask = self._totensor(m_valid_box)
+
+        return color, line, mask
+
+    def __repr__(self):
+        return f"dataset length: {self.train_len}"
+
+    def __len__(self):
+        return self.train_len
+
+    def __getitem__(self, idx):
+        # Color prepare
+        color_path = self.train_list[idx]
+        color = cv.imread(str(color_path))
+        # Line prepare
+        line = self.line_process(color_path)
+
+        color, line, mask = self._preprocess(color,
+                                             line,
+                                             self.train_size)
+
+        color = self._coordinate(color, self.color_space)
+        line = self._coordinate(line, self.line_space)
+        mask = self._coordinate(mask, self.color_space)
+
+        return color, line, mask
+
+
+class IllustTestDataset(Dataset):
+    def __init__(self, path: Path):
+        self.path = path
+        self.pathlist = list(self.path.glob('test_*.png'))
+        self.pathlen = len(self.pathlist)
+
+    def __repr__(self):
+        return f"dataset length: {self.pathlen}"
+
+    def __len__(self):
+        return self.pathlen
+
+    def __getitem__(self, idx) -> (Path, Path):
+        line_path = self.pathlist[idx]
+        line_name = str(line_path.name)
+        style_name = "hint_" + line_name[5:]
+        style_path = self.path / Path(style_name)
+
+        return line_path, style_path
+
+
+class LineTestCollator:
+    def __init__(self, color_space="rgb"):
+        self.color_space = color_space
 
     @staticmethod
-    def _variable(image_list):
-        return chainer.as_variable(xp.array(image_list).astype(xp.float32))
+    def _coordinate(img: np.array,
+                    color_space: str) -> np.array:
+        if color_space == "yuv":
+            img = img.astype(np.uint8)
+            img = cv.cvtColor(img, cv.COLOR_BGR2YCrCb)
+            img = img.transpose(2, 0, 1).astype(np.float32)
+            img = (img - 127.5) / 127.5
+        else:
+            img = img[:, :, ::-1].astype(np.float32)
+            img = (img.transpose(2, 0, 1) - 127.5) / 127.5
 
-    def _prepare_pair(self, image_path, size, mode="train"):
-        color = cv.imread(str(image_path))
-        line = self._preprocess(image_path)
+        return img
 
-        if mode == "train":
-            line, color = self._random_crop(line, color, size=size)
+    @staticmethod
+    def _totensor(array_list: List[np.array]) -> torch.Tensor:
+        array = np.array(array_list).astype(np.float32)
+        tensor = torch.FloatTensor(array)
+        tensor = tensor.cuda()
 
-        color = self._coordinate(color)
-        line = self._coordinate(line)
+        return tensor
 
-        return (line, color)
+    def _prepare(self,
+                 line_path: Path,
+                 style_path: Path) -> (np.array, np.array):
+        mask = cv.imread(str(style_path))
+        line = cv.imread(str(line_path))
 
-    def train(self, batchsize):
-        color_box = []
-        line_box = []
+        mask = self._coordinate(mask, self.color_space)
+        line = self._coordinate(line, self.color_space)
 
-        for _ in range(batchsize):
-            rnd = np.random.randint(self.train_len)
-            image_path = self.train_list[rnd]
+        return line, mask
 
-            line, color = self._prepare_pair(image_path, size=self.train_size, mode="train")
+    def __call__(self, batch):
+        l_box = []
+        m_box = []
 
-            color_box.append(color)
-            line_box.append(line)
+        for l_path, s_path in batch:
+            print(l_path, s_path)
+            line, mask = self._prepare(l_path, s_path)
 
-        color = self._variable(color_box)
-        line = self._variable(line_box)
+            l_box.append(line)
+            m_box.append(mask)
 
-        return (line, color)
+        l = self._totensor(l_box)
+        m = self._totensor(m_box)
 
-    def valid(self, validsize):
-        color_box = []
-        line_box = []
-
-        for v in range(validsize):
-            image_path = self.val_list[v]
-
-            line, color = self._prepare_pair(image_path, size=self.valid_size, mode="valid")
-
-            color_box.append(color)
-            line_box.append(line)
-
-        color = self._variable(color_box)
-        line = self._variable(line_box)
-
-        return (line, color)
+        return (l, m)
