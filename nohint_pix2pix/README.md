@@ -1,5 +1,8 @@
 # pix2pix  
 ## Summary
+
+![](https://github.com/SerialLain3170/Line-to-Color/blob/master/nohint_pix2pix/data/network.png)
+
 - The authors of pix2pix use UNet as generator.
 - They calculate not only mean absolute error but also adversarial loss which is gotten by distinguishing whether the input image is real or fake.
 - In addition to content loss and adversarial loss, gradient penalty can be chosen.
