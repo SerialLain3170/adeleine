@@ -69,11 +69,15 @@ Watching results of experiments above, even with using adversarial loss, it seem
 
 ### Methods
 - [x] userhint
+- [x] whitebox
 - [ ] gaugan
 
 ### Results
 - userhint
 ![here](https://github.com/SerialLain3170/Colorization/blob/master/atari_userhint/data/result2.png)
+
+- whitebox
+![](https://github.com/SerialLain3170/Colorization/blob/master/atari_whitebox/data/result2.png)
 
 ## Experiment with reference
 
