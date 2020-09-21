@@ -1,28 +1,28 @@
 # Automatic Line Art Colorization
 
 ## Introduction
-This repository implements converting line arts into color images automatically. Of course, we can train the neural network to deal with line art only. However, in the application system, we also need to colorize the line art with designated color in advance. There are many types of colorization with respect to hint.
+This repository implements converting line arts into color images automatically. In addition to training the neural network with line art only, this repository is able to colorize the line art with several types of hint in advance. There are mainly for types of hints.
 
 - No hint
-  - Colorization without hint
-  - Input: Line art only
+  - description: Colorization without hint
+  - input: Line art only
   
 - Atari
-  - Colorization with hint which is line of desired color in the specific region (ex. PaintsChainer)
-  - Input: Line art and atari
+  - description: Colorization with hint that includes some lines in desired color (ex. PaintsChainer)
+  - input: Line art and atari
   
 - Tag
-  - Colorzation with hint which is tag (ex. Tag2Pix)
-  - Input: Line art and tag
+  - description: Colorzation with tag (ex. Tag2Pix)
+  - input: Line art and tag
   
 - Reference
-  - Colorization with hint which is reference image (ex. style2paints V1)
-  - Input: Line art and reference image
+  - description: Colorization with reference images (ex. style2paints V1)
+  - input: Line art and reference image
   
 ## Line extraction method
-There are many variations in line extraction methods, such as XDoG or SketchKeras. But, when trained on only one type of line art, trained model comes to overfit to this type of line art and this model doesn't fully colorize another type of line art. Therefore, like Tag2Pix, I use various kinds of line art as the input of neural network.
+There are many variations in line extraction methods, such as XDoG or SketchKeras. However, if we train the model on only one type of line art, trained model comes to overfit and the model are not able to colorize another type of line art adequately. Therefore, like Tag2Pix, I use various kinds of line art as the input of neural network.
 
-I use three types of line art below.
+I use mainly three types of line art.
 
 - XDoG
   - Line extraction using two Gaussian distributions difference to standard deviations
@@ -37,7 +37,7 @@ Examples obtained by these line extraction methods are as follows.
 
 ![](https://github.com/SerialLain3170/Colorization/blob/master/Data/lineart.png)
 
-Moreover, I consider three types of data augmenation to line arts in order to avoid overfitting.
+Moreover, I add three types of data augmenation to line arts in order to avoid overfitting.
 
 - Adding intensity
 - Randomly morphology transformation to deal with various thicks of lines
@@ -46,7 +46,7 @@ Moreover, I consider three types of data augmenation to line arts in order to av
 ## Experiment without hint
 
 ### Motivation
-First of all, I need to confirm that method based on neural networks can colorize without hint precisely and diversely. The training of mapping from line arts to color images is difficult because variations in color exist. Therefore, without hint, I think the neural networks come to colorize single color in any regions. To avoid falling into local minimum, I try adversarial loss in addition to the content loss because adversarial learning trains neural network of colorization to match data distribution precisely.
+First of all, I need to confirm that method based on neural networks can colorize without hint precisely and diversely. The training of mapping from line arts to color images is difficult because of variations in color. Therefore, I hypothesize that the neural networks trained without hint come to colorize single color in any regions. To avoid this, I try adversarial loss in addition to the content loss because adversarial learning enables neural networrks to match data distribution adequately.
 
 ### Methods
 - [x] pix2pix
@@ -65,7 +65,7 @@ First of all, I need to confirm that method based on neural networks can coloriz
 ## Experiment with atari
 
 ### Motivation
-Watching results of experiments above, even with using adversarial loss, it seems that neural network falls local minimum. Some degrees of variations in color may exist, neural networks seem to learn to colorize single color to any regions in single character. I find it difficult to train mapping from line art to color image without hint. Therefore, I consider taking the hint, atari, as input of neural network.
+Considering the application systems of colorization, we need to colorize with designated color. Therefore, I try some methods that take the hint, atari, as input of neural network.
 
 ### Methods
 - [x] userhint
