@@ -4,15 +4,19 @@ import cv2 as cv
 import copy
 
 from typing import List
+from typing_extensions import Literal
 from torch.utils.data import Dataset
 from pathlib import Path
 from hint_processor import LineProcessor
+
+LineArt = List[Literal["xdog", "pencil", "digital", "blend"]]
 
 
 class IllustDataset(Dataset):
     def __init__(self,
                  data_path: Path,
                  sketch_path: Path,
+                 line_method: LineArt,
                  extension=".jpg",
                  train_size=224,
                  valid_size=256,
@@ -29,7 +33,7 @@ class IllustDataset(Dataset):
         self.train_size = train_size
         self.valid_size = valid_size
 
-        self.line_process = LineProcessor(sketch_path)
+        self.line_process = LineProcessor(sketch_path, line_method)
         self.color_space = color_space
         self.line_space = line_space
 

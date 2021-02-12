@@ -23,7 +23,7 @@ def init_weights(net: nn.Module):
     net.apply(weights_init_normal)
 
 
-# Basic components of encoder or decoder
+# Basic components of generator and discriminator
 class CBR(nn.Module):
     def __init__(self,
                  in_ch: int,
@@ -76,7 +76,7 @@ class CBR(nn.Module):
         if norm == "bn":
             modules.append(nn.BatchNorm2d(out_ch))
         elif norm == "in":
-            modules.append(nn.BatchNorm2d(out_ch))
+            modules.append(nn.InstanceNorm2d(out_ch))
 
         return modules
 
@@ -97,89 +97,89 @@ class CBR(nn.Module):
 
 
 class Generator(nn.Module):
-	def __init__(self,
-				 in_ch: int,
-				 base=64):
-		super(Generator, self).__init__()
+    def __init__(self,
+                 in_ch: int,
+                 base=64):
+        super(Generator, self).__init__()
 
-		self.enc = self._make_encoder(in_ch, base)
-		self.dec = self._make_decoder(base)
-		self.out = nn.Sequential(
-			nn.Conv2d(base, 3, 3, 1, 1),
-			nn.Tanh()
-		)
+        self.enc = self._make_encoder(in_ch, base)
+        self.dec = self._make_decoder(base)
+        self.out = nn.Sequential(
+            nn.Conv2d(base, 3, 3, 1, 1),
+            nn.Tanh()
+        )
 
-		init_weights(self.enc)
-		init_weights(self.dec)
-		init_weights(self.out)
+        init_weights(self.enc)
+        init_weights(self.dec)
+        init_weights(self.out)
 
-	@staticmethod
-	def _make_encoder(in_ch: int, base: int):
-		modules = []
-		modules.append(CBR(in_ch, base, 3, 1, 1, norm="bn"))
-		modules.append(CBR(base, base*2, 4, 2, 1, norm="bn"))
-		modules.append(CBR(base*2, base*4, 4, 2, 1, norm="bn"))
-		modules.append(CBR(base*4, base*8, 4, 2, 1, norm="bn"))
-		modules.append(CBR(base*8, base*8, 4, 2, 1, norm="bn"))
-		modules.append(CBR(base*8, base*16, 4, 2, 1, norm="bn"))
+    @staticmethod
+    def _make_encoder(in_ch: int, base: int):
+        modules = []
+        modules.append(CBR(in_ch, base, 3, 1, 1, norm="bn"))
+        modules.append(CBR(base, base*2, 4, 2, 1, norm="bn"))
+        modules.append(CBR(base*2, base*4, 4, 2, 1, norm="bn"))
+        modules.append(CBR(base*4, base*8, 4, 2, 1, norm="bn"))
+        modules.append(CBR(base*8, base*8, 4, 2, 1, norm="bn"))
+        modules.append(CBR(base*8, base*16, 4, 2, 1, norm="bn"))
 
-		modules = nn.ModuleList(modules)
+        modules = nn.ModuleList(modules)
 
-		return modules
+        return modules
 
-	@staticmethod
-	def _make_decoder(base: int):
-		modules = []
-		modules.append(CBR(base*16, base*8, 3, 1, 1, up=True, norm="bn"))
-		modules.append(CBR(base*16, base*8, 3, 1, 1, up=True, norm="bn"))
-		modules.append(CBR(base*16, base*4, 3, 1, 1, up=True, norm="bn"))
-		modules.append(CBR(base*8, base*2, 3, 1, 1, up=True, norm="bn"))
-		modules.append(CBR(base*4, base, 3, 1, 1, up=True, norm="bn"))
+    @staticmethod
+    def _make_decoder(base: int):
+        modules = []
+        modules.append(CBR(base*16, base*8, 3, 1, 1, up=True, norm="bn"))
+        modules.append(CBR(base*16, base*8, 3, 1, 1, up=True, norm="bn"))
+        modules.append(CBR(base*16, base*4, 3, 1, 1, up=True, norm="bn"))
+        modules.append(CBR(base*8, base*2, 3, 1, 1, up=True, norm="bn"))
+        modules.append(CBR(base*4, base, 3, 1, 1, up=True, norm="bn"))
 
-		modules = nn.ModuleList(modules)
+        modules = nn.ModuleList(modules)
 
-		return modules
+        return modules
 
-	def _encode(self, x: torch.Tensor) -> (torch.Tensor, List[torch.Tensor]):
-		encode_list = []
-		for layer in self.enc:
-			x = layer(x)
-			encode_list.append(x)
+    def _encode(self, x: torch.Tensor) -> (torch.Tensor, List[torch.Tensor]):
+        encode_list = []
+        for layer in self.enc:
+            x = layer(x)
+            encode_list.append(x)
 
-		return x, encode_list
+        return x, encode_list
 
-	def _decode(self,
-				x: torch.Tensor,
-				encode_list: List[torch.Tensor]) -> torch.Tensor:
-		for index, layer in enumerate(self.dec):
-			if index in [1, 2, 3, 4]:
-				x = layer(torch.cat([x, encode_list[-index-1]], dim=1))
-			else:
-				x = layer(x)
+    def _decode(self,
+                x: torch.Tensor,
+                encode_list: List[torch.Tensor]) -> torch.Tensor:
+        for index, layer in enumerate(self.dec):
+            if index in [1, 2, 3, 4]:
+                x = layer(torch.cat([x, encode_list[-index-1]], dim=1))
+            else:
+                x = layer(x)
 
-		return self.out(x)
+        return self.out(x)
 
-	def forward(self, x: torch.Tensor) -> torch.Tensor:
-		x, encode_list = self._encode(x)
-		x = self._decode(x, encode_list)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x, encode_list = self._encode(x)
+        x = self._decode(x, encode_list)
 
-		return x
+        return x
 
 
 class Discriminator(nn.Module):
-	def __init__(self, base: int=64):
-		super(Discriminator, self).__init__()
+    def __init__(self, base: int=64):
+        super(Discriminator, self).__init__()
 
-		self.dis = nn.Sequential(
-			CBR(3, base, 4, 2, 1, norm="bn"),
-			CBR(base, base*2, 4, 2, 1, norm="bn"),
-			CBR(base*2, base*4, 4, 2, 1, norm="bn"),
-			CBR(base*4, base*8, 4, 2, 1, norm="bn"),
-			CBR(base*8, base*16, 4, 2, 1, norm="bn"),
-			nn.Conv2d(base*16, 1, 1, 1, 0)
-		)
+        self.dis = nn.Sequential(
+            CBR(3, base, 4, 2, 1, norm="bn"),
+            CBR(base, base*2, 4, 2, 1, norm="bn"),
+            CBR(base*2, base*4, 4, 2, 1, norm="bn"),
+            CBR(base*4, base*8, 4, 2, 1, norm="bn"),
+            CBR(base*8, base*16, 4, 2, 1, norm="bn"),
+            nn.Conv2d(base*16, 1, 1, 1, 0)
+        )
 
-		init_weights(self.dis)
+        init_weights(self.dis)
 
-	def forward(self, x: torch.Tensor) -> torch.Tensor:
-		return self.dis(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.dis(x)

@@ -11,6 +11,7 @@ dataset:
   valid_size: 256
   color_space: "rgb"
   line_space: "rgb"
+  line_method: ["xdog", "pencil", "blend"]
 
 model:
   generator:
