@@ -65,7 +65,7 @@ class Vgg19(nn.Module):
         return [h_relu1, h_relu2, h_relu3, h_relu4, h]
 
 
-# Basic components of encoder or decoder
+# Basic components of Generator and Discriminator
 class CBR(nn.Module):
     def __init__(self,
                  in_ch: int,
@@ -118,7 +118,7 @@ class CBR(nn.Module):
         if norm == "bn":
             modules.append(nn.BatchNorm2d(out_ch))
         elif norm == "in":
-            modules.append(nn.BatchNorm2d(out_ch))
+            modules.append(nn.InstanceNorm2d(out_ch))
 
         return modules
 

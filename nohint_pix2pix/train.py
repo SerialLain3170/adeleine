@@ -195,7 +195,7 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Style2Paint")
+    parser = argparse.ArgumentParser(description="Pix2pix")
     parser.add_argument('--session', type=str, default='pix2pix', help="session name")
     parser.add_argument('--data_path', type=Path, help="path containing color images")
     parser.add_argument('--sketch_path', type=Path, help="path containing sketch images")

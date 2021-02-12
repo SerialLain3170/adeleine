@@ -4,7 +4,7 @@ import datetime
 from pathlib import Path
 
 
-def session(session_name: str) -> (Path, Path): 
+def session(session_name: str) -> (Path, Path):
     session_path = Path("session") / Path(session_name)
     if session_path.exists():
         dt = datetime.datetime.now()

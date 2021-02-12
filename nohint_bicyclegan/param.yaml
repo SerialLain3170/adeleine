@@ -11,6 +11,7 @@ dataset:
   valid_size: 256
   color_space: "yuv"
   line_space: "yuv"
+  line_method: ["xdog"]
 
 model:
   generator:

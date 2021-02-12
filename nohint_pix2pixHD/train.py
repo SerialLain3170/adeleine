@@ -2,113 +2,19 @@ import yaml
 import torch
 import torch.nn as nn
 import argparse
+import pprint
 
 from typing import List, Dict
 from pathlib import Path
+from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 from model import LocalEnhancer, GlobalGenerator, Discriminator, down_sample, Vgg19
 from torch.utils.data import DataLoader
 from dataset import IllustDataset
 from visualize import Visualizer
-
-maeloss = nn.L1Loss()
-mseloss = nn.MSELoss()
-softplus = nn.Softplus()
-
-
-class Pix2pixHDCalculator:
-    def __init__(self):
-        pass
-
-    @staticmethod
-    def content_loss(y: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        return torch.mean(torch.abs(y - t))
-
-    @staticmethod
-    def feature_matching_loss(fake_feats: List[torch.Tensor],
-                              real_feats: List[torch.Tensor]) -> torch.Tensor:
-        sum_loss = 0
-
-        for y, t in zip(fake_feats, real_feats):
-            sum_loss += torch.mean(torch.abs(y-t))
-
-        return sum_loss
-
-    @staticmethod
-    def adversarial_disloss(y_list: List[torch.Tensor],
-                            t_list: List[torch.Tensor]) -> torch.Tensor:
-        sum_loss = 0
-
-        for y, t in zip(y_list, t_list):
-            loss = torch.mean(softplus(-t)) + torch.mean(softplus(y))
-            sum_loss += loss
-
-        return sum_loss
-
-    @staticmethod
-    def adversarial_genloss(y_list: List[torch.Tensor]) -> torch.Tensor:
-        sum_loss = 0
-
-        for y in y_list:
-            loss = torch.mean(softplus(-y))
-            sum_loss += loss
-
-        return sum_loss
-
-    @staticmethod
-    def adversarial_hingedis(y_list: List[torch.Tensor],
-                             t_list: List[torch.Tensor]) -> torch.Tensor:
-        sum_loss = 0
-
-        for y, t in zip(y_list, t_list):
-            sum_loss += nn.ReLU()(1.0 + y).mean()
-            sum_loss += nn.ReLU()(1.0 - t).mean()
-
-        return sum_loss
-
-    @staticmethod
-    def adversarial_hingegen(y_list: List[torch.Tensor]) -> torch.Tensor:
-        sum_loss = 0
-
-        for y in y_list:
-            sum_loss += -y.mean()
-
-        return sum_loss
-
-    def dis_loss(self, discriminator: nn.Module,
-                 y: torch.Tensor,
-                 t: torch.Tensor) -> torch.Tensor:
-
-        _, y_outputs = discriminator(y)
-        _, t_outputs = discriminator(t)
-
-        return self.adversarial_hingedis(y_outputs, t_outputs)
-
-    def gen_loss(self, discriminator: nn.Module,
-                 y: torch.Tensor,
-                 t: torch.Tensor) -> (torch.Tensor, torch.Tensor):
-
-        y_feats, y_outputs = discriminator(y)
-        t_feats, _ = discriminator(t)
-
-        adv_loss = self.adversarial_hingegen(y_outputs)
-        fm_loss = self.feature_matching_loss(y_feats, t_feats)
-
-        return adv_loss, fm_loss
-
-    @staticmethod
-    def perceptual_loss(vgg: nn.Module,
-                        y: torch.Tensor,
-                        t: torch.Tensor) -> torch.Tensor:
-        sum_loss = 0
-        y_feat = vgg(y)
-        t_feat = vgg(t)
-
-        for y, t in zip(y_feat, t_feat):
-            _, c, h, w = y.size()
-            sum_loss += torch.mean(torch.abs(y-t)) / (c * h * w)
-
-        return sum_loss
+from utils import session
+from loss import Pix2pixHDCalculator
 
 
 class Trainer:
@@ -131,6 +37,7 @@ class Trainer:
 
         self.dataset = IllustDataset(data_path,
                                      sketch_path,
+                                     self.data_config["line_method"],
                                      self.data_config["extension"],
                                      self.data_config["train_size"],
                                      self.data_config["valid_size"],
@@ -190,6 +97,18 @@ class Trainer:
 
         return [x_val, l_val, m_val, c_val]
 
+    @staticmethod
+    def _build_dict(loss_dict: Dict[str, float],
+                    epoch: int,
+                    num_epochs: int) -> Dict[str, str]:
+
+        report_dict = {}
+        report_dict["epoch"] = f"{epoch}/{num_epochs}"
+        for k, v in loss_dict.items():
+            report_dict[k] = f"{v:.6f}"
+
+        return report_dict
+
     def _eval(self,
 			  iteration: int,
 			  validsize: int,
@@ -200,6 +119,8 @@ class Trainer:
                    f"{self.modeldir}/local_enhancer_{iteration}.pt")
         torch.save(self.glo_gen.state_dict(),
                    f"{self.modeldir}/global_generator_{iteration}.pt")
+        torch.save(self.dis.state_dict(),
+                   f"{self.modeldir}/discriminator_{iteration}.pt")
 
         with torch.no_grad():
             if pretrain:
@@ -216,6 +137,8 @@ class Trainer:
         color = color.cuda()
         line = line.cuda()
         mask = mask.cuda()
+
+        loss = {}
 
         if self.mask:
             x = torch.cat([line, mask], dim=1)
@@ -239,31 +162,42 @@ class Trainer:
         y_cat = torch.cat([hint, y], dim=1)
 
         # discriminate images themselve
-        loss = self.loss_config["adv"] * self.lossfunc.dis_loss(self.dis,
-                                                                y_cat.detach(),
-                                                                t_cat)
+        dis_loss = self.loss_config["adv"] * self.lossfunc.dis_loss(self.dis,
+                                                                    y_cat.detach(),
+                                                                    t_cat)
 
         self.dis_opt.zero_grad()
-        loss.backward()
+        dis_loss.backward()
         self.dis_opt.step()
 
-        adv_loss, fm_loss = self.lossfunc.gen_loss(self.dis,
-                                                   y_cat,
-                                                   t_cat)
+        adv_gen_loss, fm_loss = self.lossfunc.gen_loss(self.dis,
+                                                       y_cat,
+                                                       t_cat)
 
         # gray scale
-        loss = self.loss_config["fm"] * fm_loss + self.loss_config["adv"] * adv_loss
-        loss += self.loss_config["content"] * self.lossfunc.content_loss(y_cat[:, 3:6, :, :],
-                                                                         t_cat[:, 3:6, :, :])
-        loss += self.loss_config["perceptual"] * self.lossfunc.perceptual_loss(self.vgg,
-                                                                               y_cat[:, 3:6, :, :],
-                                                                               t_cat[:, 3:6, :, :])
+        fm_loss = self.loss_config["fm"] * fm_loss
+        adv_gen_loss = self.loss_config["adv"] * adv_gen_loss
+        con_loss = self.loss_config["content"] * self.lossfunc.content_loss(y_cat[:, 3:6, :, :],
+                                                                            t_cat[:, 3:6, :, :])
+        perceptual_loss = self.loss_config["perceptual"] * self.lossfunc.perceptual_loss(self.vgg,
+                                                                                         y_cat[:, 3:6, :, :],
+                                                                                         t_cat[:, 3:6, :, :])
+
+        dis_loss = adv_gen_loss + fm_loss + con_loss + perceptual_loss
 
         self.loc_gen_opt.zero_grad()
         self.glo_gen_opt.zero_grad()
-        loss.backward()
+        dis_loss.backward()
         self.loc_gen_opt.step()
         self.glo_gen_opt.step()
+
+        loss["loss_adv_dis"] = dis_loss
+        loss["loss_adv_gen"] = adv_gen_loss
+        loss["loss_fm"] = fm_loss
+        loss["loss_content"] = con_loss
+        loss["loss_perceptual"] = perceptual_loss
+
+        return loss
 
     def __call__(self):
         iteration = 0
@@ -277,35 +211,37 @@ class Trainer:
                                     batch_size=self.train_config["batchsize"],
                                     shuffle=True,
                                     drop_last=True)
-            progress_bar = tqdm(dataloader)
 
-            for index, data in enumerate(progress_bar):
-                iteration += 1
-                self._iter(data, pretrain, epoch)
+            with tqdm(total=len(self.dataset)) as pbar:
+                for index, data in enumerate(dataloader):
+                    iteration += 1
+                    loss_dict = self._iter(data, pretrain, epoch)
+                    report_dict = self._build_dict(loss_dict,
+                                                   epoch,
+                                                   self.train_config["epoch"])
 
-                if iteration % self.train_config["snapshot_interval"] == 1:
-                    self._eval(iteration,
-                               self.train_config["validsize"],
-                               v_list,
-                               pretrain > epoch)
+                    pbar.update(self.train_config["batchsize"])
+                    pbar.set_postfix(**report_dict)
+
+                    if iteration % self.train_config["snapshot_interval"] == 1:
+                        self._eval(iteration,
+                                   self.train_config["validsize"],
+                                   v_list,
+                                   pretrain > epoch)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Style2Paint")
-    parser.add_argument('--outdir', type=Path, default='outdir', help="output directory")
-    parser.add_argument('--modeldir', type=Path, default='modeldir', help="model output directory")
+    parser = argparse.ArgumentParser(description="Pix2pixHD")
+    parser.add_argument('--session', type=str, default='pix2pixhd', help="session name")
     parser.add_argument('--data_path', type=Path, help="path containing color images")
     parser.add_argument('--sketch_path', type=Path, help="path containing sketch images")
     args = parser.parse_args()
 
-    outdir = args.outdir
-    outdir.mkdir(exist_ok=True)
-
-    modeldir = args.modeldir
-    modeldir.mkdir(exist_ok=True)
+    outdir, modeldir = session(args.session)
 
     with open("param.yaml", "r") as f:
         config = yaml.safe_load(f)
+        pprint.pprint(config)
 
     trainer = Trainer(config,
                       outdir,

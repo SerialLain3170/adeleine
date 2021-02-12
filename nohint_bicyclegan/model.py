@@ -9,6 +9,7 @@ from torch.nn import init
 from torchvision import models
 
 
+# Initialization of model
 def weights_init_normal(m: nn.Module):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
@@ -83,6 +84,7 @@ class Vgg19(nn.Module):
         return h
 
 
+# Basic components of generatod and discriminator
 class CBR(nn.Module):
     def __init__(self,
                  in_ch: int,
@@ -119,7 +121,7 @@ class CBR(nn.Module):
         if norm == "bn":
             modules.append(nn.BatchNorm2d(out_ch))
         elif norm == "in":
-            modules.append(nn.BatchNorm2d(out_ch))
+            modules.append(nn.InstanceNorm2d(out_ch))
 
         return modules
 

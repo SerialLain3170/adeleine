@@ -2,8 +2,11 @@ import numpy as np
 import cv2 as cv
 
 from typing import List
+from typing_extensions import Literal
 from xdog import XDoG
 from pathlib import Path
+
+LineArt = List[Literal["xdog", "pencil", "digital", "blend"]]
 
 
 class BasicProtocol:
@@ -73,14 +76,31 @@ class ColorVariant(RandomProtocol):
 class LineSelector(BasicProtocol):
     def __init__(self,
                  sketch_path: Path,
+                 line_method: LineArt,
                  blend=0.5):
-        self.line = ["xdog"]
+        self.line_method = line_method
         self.blend = 0.5
         self.pre_intensity = AddIntensity(intensity=1.4)
         self.post_intensity = AddIntensity(intensity=(1/1.5))
         self.sketch_path = sketch_path
 
         self.xdog_process = XDoG()
+
+        self._message(line_method)
+
+    @staticmethod
+    def _message(line_method: LineArt):
+        print("Considering these line extraction methods...")
+        for method in line_method:
+            if method == "xdog":
+                print("XDoG will be implemented.")
+            elif method == "pencil":
+                print("SketchKeras will be implemented.")
+            elif method == "blend":
+                print("XDoG + SketchKeras will be implemented.")
+            elif method == "digital":
+                print("Sketch Simplification will be implemented.")
+        print("\n")
 
     def _xdog_preprocess(self, path: Path) -> np.array:
         img = self.xdog_process(str(path))
@@ -109,7 +129,7 @@ class LineSelector(BasicProtocol):
         return self.post_intensity.exec(blend)
 
     def exec(self, path: Path) -> np.array:
-        method = np.random.choice(self.line)
+        method = np.random.choice(self.line_method)
 
         if method == "xdog":
             img = self._xdog_preprocess(path)
@@ -122,19 +142,22 @@ class LineSelector(BasicProtocol):
 
 
 class LineProcessor:
-    def __init__(self, sketch_path: Path):
+    def __init__(self, sketch_path: Path, line_method: LineArt):
         self.process_list = [
-            LineSelector(sketch_path),
-            AddIntensity(),
+            LineSelector(sketch_path, line_method),
             Morphology(),
             ColorVariant()
         ]
 
         self._message(self.process_list)
 
-    def _message(self, process_list: List):
-        for process in process_list:
-            print(process)
+    @staticmethod
+    def _message(process_list: List):
+        print("Considering these augmentations for line arts...")
+        for index, process in enumerate(process_list):
+            if index > 0:
+                print(process)
+        print("\n")
 
     def __call__(self, x: Path) -> np.array:
         for process in self.process_list:
