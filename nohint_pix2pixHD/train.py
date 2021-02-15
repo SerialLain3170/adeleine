@@ -110,10 +110,10 @@ class Trainer:
         return report_dict
 
     def _eval(self,
-			  iteration: int,
-			  validsize: int,
-			  v_list: List[torch.Tensor],
-			  pretrain: bool):
+              iteration: int,
+              validsize: int,
+              v_list: List[torch.Tensor],
+              pretrain: bool):
 
         torch.save(self.loc_gen.state_dict(),
                    f"{self.modeldir}/local_enhancer_{iteration}.pt")
@@ -183,11 +183,11 @@ class Trainer:
                                                                                          y_cat[:, 3:6, :, :],
                                                                                          t_cat[:, 3:6, :, :])
 
-        dis_loss = adv_gen_loss + fm_loss + con_loss + perceptual_loss
+        gen_loss = adv_gen_loss + fm_loss + con_loss + perceptual_loss
 
         self.loc_gen_opt.zero_grad()
         self.glo_gen_opt.zero_grad()
-        dis_loss.backward()
+        gen_loss.backward()
         self.loc_gen_opt.step()
         self.glo_gen_opt.step()
 

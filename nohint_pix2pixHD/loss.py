@@ -21,8 +21,11 @@ class Pix2pixHDCalculator:
                               real_feats: List[torch.Tensor]) -> torch.Tensor:
         sum_loss = 0
 
+        d_weight = float(1.0 / 3.0)
+        feat_weight = float(4.0 / 7.0)
+
         for y, t in zip(fake_feats, real_feats):
-            sum_loss += torch.mean(torch.abs(y-t))
+            sum_loss += d_weight * feat_weight * torch.mean(torch.abs(y-t))
 
         return sum_loss
 
