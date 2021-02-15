@@ -1,12 +1,12 @@
 train:
   epoch: 1000
   snapshot_interval: 2000
-  batchsize: 16
+  batchsize: 8
   validsize: 16
   l_dim: 8
 
 dataset:
-  extension: ".png"
+  extension: ".jpg"
   train_size: 256
   valid_size: 256
   color_space: "yuv"
@@ -30,6 +30,7 @@ model:
     b2: 0.99
     mode: "train"
   encoder:
+    in_ch: 6
     l_dim: 8
     lr: 0.0002
     b1: 0.5

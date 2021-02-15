@@ -24,7 +24,7 @@ class DanbooruFacesDataset(Dataset):
                  line_space="rgb"):
 
         self.data_path = data_path
-        self.pathlist = list(data_path.glob(f"**/*{extension}"))
+        self.pathlist = list(data_path.glob(f"jpg/**/*{extension}"))
         self.train_list, self.val_list = self._train_val_split(self.pathlist)
         self.train_len = len(self.train_list)
 

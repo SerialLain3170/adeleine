@@ -221,11 +221,11 @@ class Trainer:
 
                     if iteration % self.train_config["snapshot_interval"] == 1:
                         self._eval(iteration,
-                                self.train_config["validsize"],
-                                v_list, self.outdir)
+                                   self.train_config["validsize"],
+                                   v_list, self.outdir)
                         self._eval(iteration,
-                                self.train_config["validsize"],
-                                v_fix_list, self.outdir_fix)
+                                   self.train_config["validsize"],
+                                   v_fix_list, self.outdir_fix)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BicycleGAN")
