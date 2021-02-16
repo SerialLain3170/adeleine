@@ -24,7 +24,9 @@ def init_weights(net: nn.Module):
     net.apply(weights_init_normal)
 
 
-def calc_mean_std(feat: torch.Tensor, eps=1e-5) -> (torch.Tensor, torch.Tensor):
+# AdaIN modules
+def calc_mean_std(feat: torch.Tensor,
+                  eps=1e-5) -> (torch.Tensor, torch.Tensor):
     size = feat.size()
     N, C = size[:2]
     feat_var = feat.view(N, C, -1).var(dim=2) + eps
@@ -34,7 +36,8 @@ def calc_mean_std(feat: torch.Tensor, eps=1e-5) -> (torch.Tensor, torch.Tensor):
     return feat_mean, feat_std
 
 
-def adain(content_feat: torch.Tensor, style_feat: torch.Tensor) -> torch.Tensor:
+def adain(content_feat: torch.Tensor,
+          style_feat: torch.Tensor) -> torch.Tensor:
     size = content_feat.size()
     style_mean, style_std = calc_mean_std(style_feat)
     content_mean, content_std = calc_mean_std(content_feat)
@@ -45,9 +48,11 @@ def adain(content_feat: torch.Tensor, style_feat: torch.Tensor) -> torch.Tensor:
     return normalized_feat * style_std.expand(size) + style_mean.expand(size)
 
 
-def adain_linear(content_feat: torch.Tensor, style_feat: torch.Tensor) -> torch.Tensor:
+def adain_linear(content_feat: torch.Tensor,
+                 style_feat: torch.Tensor,
+                 sep_dim: int) -> torch.Tensor:
     size = content_feat.size()
-    style_mean, style_std = style_feat[:, :512], style_feat[:, 512:]
+    style_mean, style_std = style_feat[:, :sep_dim], style_feat[:, sep_dim:]
     style_mean = style_mean.unsqueeze(2).unsqueeze(3)
     style_std = style_std.unsqueeze(2).unsqueeze(3)
     content_mean, content_std = calc_mean_std(content_feat)
@@ -67,7 +72,7 @@ class Vgg19(nn.Module):
 
         if layer == 'four':
             self.slice = nn.Sequential()
-            for x in range(21):
+            for x in range(27):
                 self.slice.add_module(str(x), vgg_pretrained_features[x])
 
         elif layer == 'five':
@@ -108,8 +113,7 @@ class Vgg19(nn.Module):
             h_relu2 = self.slice2(h_relu1)
             h_relu3 = self.slice3(h_relu2)
             h_relu4 = self.slice4(h_relu3)
-            h_relu5 = self.slice5(h_relu4)
-            h = [h_relu1, h_relu2, h_relu3, h_relu4, h_relu5]
+            h = self.slice5(h_relu4)
 
         return h
 
@@ -207,16 +211,16 @@ class ResBlock(nn.Module):
 
 
 class AdaINResBlock(nn.Module):
-    def __init__(self,
-                 in_ch: int,
-                 out_ch: int):
+    def __init__(self, in_ch: int, out_ch: int):
         super(AdaINResBlock, self).__init__()
 
         self.c0 = nn.Conv2d(in_ch, out_ch, 3, 1, 1)
         self.c1 = nn.Conv2d(out_ch, out_ch, 3, 1, 1)
         self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, x: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+    def forward(self,
+                x: torch.Tensor,
+                z: torch.Tensor) -> torch.Tensor:
         h = self.c0(x)
         h = self.relu(adain(h, z))
         h = self.c1(h)
@@ -226,16 +230,17 @@ class AdaINResBlock(nn.Module):
 
 
 class AdaINMLPResBlock(nn.Module):
-    def __init__(self,
-                 in_ch: int,
-                 out_ch: int):
+    def __init__(self, in_ch: int, out_ch: int):
         super(AdaINMLPResBlock, self).__init__()
 
         self.c0 = nn.Conv2d(in_ch, out_ch, 3, 1, 1)
         self.c1 = nn.Conv2d(out_ch, out_ch, 3, 1, 1)
         self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, x: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+    def forward(self,
+                x: torch.Tensor,
+                z: torch.Tensor) -> torch.Tensor:
+
         h = self.c0(x)
         h = self.relu(adain_linear(h, z))
         h = self.c1(h)
@@ -245,9 +250,7 @@ class AdaINMLPResBlock(nn.Module):
 
 
 class SACat(nn.Module):
-    def __init__(self,
-                 in_ch: int,
-                 out_ch: int):
+    def __init__(self, in_ch: int, out_ch: int):
         super(SACat, self).__init__()
         self.c0 = nn.Conv2d(in_ch*2, out_ch, 1, 1, 0)
         self.c1 = nn.Conv2d(out_ch, out_ch, 1, 1, 0)
@@ -265,9 +268,7 @@ class SACat(nn.Module):
 
 
 class SECat(nn.Module):
-    def __init__(self,
-                 in_ch: int,
-                 out_ch: int):
+    def __init__(self, in_ch: int, out_ch: int):
         super(SECat, self).__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.se = nn.Sequential(
@@ -289,12 +290,10 @@ class SECat(nn.Module):
 
 
 class SACatResBlock(nn.Module):
-    def __init__(self,
-                 in_ch: int,
-                 out_ch: int):
+    def __init__(self, in_ch: int, out_ch: int):
         super(SACatResBlock, self).__init__()
         self.c0 = nn.Conv2d(in_ch, out_ch, 3, 1, 1)
-        self.bn0 = nn.BatchNorm2d(out_ch)
+        self.bn0 = nn.InstanceNorm2d(out_ch)
         self.sa = SACat(out_ch, out_ch)
 
         self.relu = nn.ReLU()
@@ -309,9 +308,7 @@ class SACatResBlock(nn.Module):
 
 
 class SECatResBlock(nn.Module):
-    def __init__(self,
-                 in_ch: int,
-                 out_ch: int):
+    def __init__(self, in_ch: int, out_ch: int):
         super(SECatResBlock, self).__init__()
         self.cbr = nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, 1, 1),
@@ -322,191 +319,267 @@ class SECatResBlock(nn.Module):
 
     def forward(self,
                 x: torch.Tensor,
-                extractor: torch.Tensor) -> torch.Tensor:
+                extracotr: torch.Tensor) -> torch.Tensor:
         h = self.cbr(x)
-        h = h * self.se(h, extractor)
+        h = h * self.se(h, extracotr)
 
         return h + x
 
 
-class SCFT(nn.Module):
-    def __init__(self, base=512):
-        super(SCFT, self).__init__()
-
-        self.cq = nn.Conv2d(base, int(base/8), 1, 1, 0)
-        self.ck = nn.Conv2d(base, int(base/8), 1, 1, 0)
-        self.cv = nn.Conv2d(base, base, 1, 1, 0)
-
-        self.softmax = nn.Softmax(dim=-1)
-        self.scale = base ** 0.5
-
-    def forward(self,
-                vs: torch.Tensor,
-                vr: torch.Tensor) -> torch.Tensor:
-        batch, ch, height, width = vs.size()
-        h_q = self.cq(vs).view(batch, int(ch/8), height * width).permute(0, 2, 1)
-        h_k = self.ck(vr).view(batch, int(ch/8), height * width)
-        energy = torch.bmm(h_q, h_k) / self.scale
-        attention = self.softmax(energy).permute(0, 2, 1)
-        h_v = self.cv(vr).view(batch, ch, height * width)
-
-        h = torch.bmm(h_v, attention)
-        h = h.view(batch, ch, height, width)
-
-        return h + vs
-
-
-class Generator(nn.Module):
+# Main components
+class ContentEncoder(nn.Module):
     def __init__(self,
-                 scft_base=64):
+                 in_ch=3,
+                 base=64):
+        super(ContentEncoder, self).__init__()
 
-        super(Generator, self).__init__()
-
-        self.pool2 = nn.AvgPool2d(2, 2, 0)
-        self.pool4 = nn.AvgPool2d(8, 4, 2)
-
-        self.se = self._make_encoder(base=scft_base)
-        self.ce = self._make_encoder(base=scft_base)
-        mid_base = scft_base * (16 + 8 + 4)
-
-        self.scft = SCFT(mid_base)
-        self.res = self._make_reslayer(mid_base)
-
-        self.dec = self._make_decoder(base=scft_base)
-
-        self.out = nn.Sequential(
-            nn.Conv2d(scft_base*2, 3, 7, 1, 3),
-            nn.Tanh()
+        self.encoder = self._make_encoder(in_ch, base)
+        self.res = nn.Sequential(
+            ResBlock(base*8, base*8),
+            ResBlock(base*8, base*8)
         )
 
-        init_weights(self.ce)
-        init_weights(self.se)
-        init_weights(self.res)
-        init_weights(self.scft)
-        init_weights(self.dec)
-        init_weights(self.out)
-
     @staticmethod
-    def _make_encoder(base: int):
+    def _make_encoder(in_ch: int, base: int):
         modules = []
-        modules.append(CBR(3, base, 3, 1, 1))
-        modules.append(CBR(base, base, 3, 1, 1))
+        modules.append(CBR(in_ch, base, 7, 1, 3))
         modules.append(CBR(base, base*2, 4, 2, 1))
-        modules.append(CBR(base*2, base*2, 3, 1, 1))
         modules.append(CBR(base*2, base*4, 4, 2, 1))
-        modules.append(CBR(base*4, base*4, 3, 1, 1))
         modules.append(CBR(base*4, base*8, 4, 2, 1))
-        modules.append(CBR(base*8, base*8, 3, 1, 1))
-        modules.append(CBR(base*8, base*16, 4, 2, 1))
-        modules.append(CBR(base*16, base*16, 3, 1, 1))
+        modules.append(CBR(base*8, base*8, 4, 2, 1))
 
-        return nn.ModuleList(modules)
+        modules = nn.ModuleList(modules)
 
-    @staticmethod
-    def _make_reslayer(base: int):
-        modules = []
-        modules.append(ResBlock(base, base))
-        modules.append(ResBlock(base, base))
-        modules.append(ResBlock(base, base))
-        modules.append(ResBlock(base, base))
-
-        return nn.ModuleList(modules)
-
-    @staticmethod
-    def _make_decoder(base: int):
-        modules = []
-        modules.append(CBR(base*(16+8+4), base*8, 3, 1, 1, up=True))
-        modules.append(CBR(base*16, base*4, 3, 1, 1, up=True))
-        modules.append(CBR(base*8, base*2, 3, 1, 1, up=True))
-        modules.append(CBR(base*4, base*2, 3, 1, 1, up=True))
-
-        return nn.ModuleList(modules)
-
-    def _content_encode(self,
-                        x: torch.Tensor) -> (torch.Tensor, List[torch.Tensor]):
-        encode_list = []
-        final_list = []
-        for i, layer in enumerate(self.ce):
-            x = layer(x)
-            if i == 3:
-                encode_list.append(x)
-            elif i == 5:
-                encode_list.append(x)
-                final_list.append(self.pool4(x))
-            elif i == 7:
-                encode_list.append(x)
-                final_list.append(self.pool2(x))
-            elif i == 9:
-                final_list.append(x)
-
-        x = torch.cat(final_list, dim=1)
-
-        return x, encode_list
-
-    def _style_encode(self, x: torch.Tensor) -> torch.Tensor:
-        final_list = []
-        for i, layer in enumerate(self.ce):
-            x = layer(x)
-            if i == 5:
-                final_list.append(self.pool4(x))
-            elif i == 7:
-                final_list.append(self.pool2(x))
-            elif i == 9:
-                final_list.append(x)
-
-        x = torch.cat(final_list, dim=1)
-
-        return x
-
-    def _res(self, x: torch.Tensor) -> torch.Tensor:
-        for layer in self.res:
-            x = layer(x)
-
-        return x
-
-    def _decode(self,
-                x: torch.Tensor,
-                encode_list: List[torch.Tensor]) -> torch.Tensor:
-        for index, layer in enumerate(self.dec):
-            if index in [1, 2, 3]:
-                x = layer(torch.cat([x, encode_list[-index]], dim=1))
-            else:
-                x = layer(x)
-
-        return self.out(x)
+        return modules
 
     def forward(self,
-                x: torch.Tensor,
-                s: torch.Tensor) -> torch.Tensor:
-        ce, mid_layer_list = self._content_encode(x)
-        se = self._style_encode(s)
+                x: torch.Tensor) -> (torch.Tensor, List[torch.Tensor]):
 
-        h = self.scft(ce, se)
-        h = self._res(h)
-        h = self._decode(h, mid_layer_list)
+        mid_layer_list = []
+        for layer in self.encoder:
+            x = layer(x)
+            mid_layer_list.append(x)
+
+        h = self.res(x)
+
+        return h, mid_layer_list
+
+
+class StyleEncoderVgg(nn.Module):
+    def __init__(self):
+        super(StyleEncoderVgg, self).__init__()
+
+        self.vgg = Vgg19(requires_grad=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.vgg(x)
+
+
+class StyleEncoder(nn.Module):
+    def __init__(self, base=64):
+        super(StyleEncoder, self).__init__()
+
+        self.enc = nn.Sequential(
+            CBR(3, base, 7, 1, 3),
+            CBR(base, base*2, 4, 2, 1),
+            CBR(base*2, base*4, 4, 2, 1),
+            CBR(base*4, base*8, 4, 2, 1),
+            CBR(base*8, base*8, 4, 2, 1),
+            ResBlock(base*8, base*8),
+            ResBlock(base*8, base*8)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.enc(x)
+
+
+class StyleEncoderMLP(nn.Module):
+    def __init__(self, base=64):
+        super(StyleEncoderMLP, self).__init__()
+
+        self.enc = nn.Sequential(
+            CBR(3, base, 7, 1, 3),
+            CBR(base, base*2, 4, 2, 1),
+            CBR(base*2, base*4, 4, 2, 1),
+            CBR(base*4, base*8, 4, 2, 1),
+            CBR(base*8, base*8, 4, 2, 1),
+            ResBlock(base*8, base*8),
+            ResBlock(base*8, base*8)
+        )
+
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.mlp = nn.Sequential(
+            nn.Linear(base*8, base*8),
+            nn.ReLU(),
+            nn.Linear(base*8, base*8),
+            nn.ReLU(),
+            nn.Linear(base*8, base*16),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.enc(x)
+        h = self.pool(h).squeeze(3).squeeze(2)
+        h = self.mlp(h)
 
         return h
 
 
-class Discriminator(nn.Module):
+class GuideDecoder(nn.Module):
     def __init__(self, base=64):
-        super(Discriminator, self).__init__()
-        self.cnns = nn.ModuleList()
-        for _ in range(3):
-            self.cnns.append(self._make_nets(base))
-        self.down = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)
+        super(GuideDecoder, self).__init__()
 
-    def _make_nets(self, base: int):
-        model = nn.Sequential(
-            CBR(3, base, 4, 2, 1),
-            CBR(base, base*2, 4, 2, 1),
-            CBR(base*2, base*4, 4, 2, 1),
-            CBR(base*4, base*8, 4, 2, 1),
-            CBR(base*8, base*16, 4, 2, 1),
-            nn.Conv2d(base*16, 1, 1, 1, 0)
+        self.decoder = self._make_decoder(base)
+        self.out_layer = nn.Sequential(
+            nn.Conv2d(base, 3, 3, 1, 1),
+            nn.Tanh()
         )
 
-        init_weights(model)
+    @staticmethod
+    def _make_decoder(base: int):
+        modules = []
+        modules.append(CBR(base*8, base*4, 3, 1, 1, up=True))
+        modules.append(CBR(base*4, base*4, 3, 1, 1, up=True))
+        modules.append(CBR(base*4, base*2, 3, 1, 1, up=True))
+        modules.append(CBR(base*2, base, 3, 1, 1, up=True))
+
+        modules = nn.ModuleList(modules)
+
+        return modules
+
+    def forward(self,
+                x: torch.Tensor) -> torch.Tensor:
+        for layer in self.decoder:
+            x = layer(x)
+
+        return self.out_layer(x)
+
+
+class Decoder(nn.Module):
+    def __init__(self, base=64):
+        super(Decoder, self).__init__()
+
+        self.decoder = self._make_decoder(base)
+        self.out_layer = nn.Sequential(
+            nn.Conv2d(base*2, 3, 7, 1, 3),
+            nn.Tanh()
+        )
+
+    @staticmethod
+    def _make_decoder(base: int):
+        modules = []
+        modules.append(CBR(base*16, base*8, 3, 1, 1, up=True))
+        modules.append(CBR(base*16, base*4, 3, 1, 1, up=True))
+        modules.append(CBR(base*8, base*2, 3, 1, 1, up=True))
+        modules.append(CBR(base*4, base*2, 3, 1, 1, up=True))
+
+        modules = nn.ModuleList(modules)
+
+        return modules
+
+    def forward(self,
+                x: torch.Tensor,
+                mid_layer_list: torch.Tensor) -> torch.Tensor:
+        for index, layer in enumerate(self.decoder):
+            x = layer(torch.cat([x, mid_layer_list[-index-1]], dim=1))
+
+        return self.out_layer(x)
+
+
+class Generator(nn.Module):
+    def __init__(self,
+                 in_ch=3,
+                 base=64,
+                 num_layers=4,
+                 attn_type="sa",
+                 guide=False):
+
+        super(Generator, self).__init__()
+
+        self.ce = ContentEncoder(in_ch=in_ch)
+        self.se = self._make_style_encoder(attn_type)
+        self.res = self._make_reslayer(attn_type, base, num_layers)
+        self.dec = Decoder()
+        self.guide = guide
+
+        init_weights(self.ce)
+        init_weights(self.se)
+        init_weights(self.res)
+        init_weights(self.dec)
+
+        if guide:
+            self.g_dec1 = GuideDecoder()
+            self.g_dec2 = GuideDecoder()
+            init_weights(self.g_dec1)
+            init_weights(self.g_dec2)
+
+    @staticmethod
+    def _make_style_encoder(attn_type: str) -> nn.Module:
+        if attn_type == "linear":
+            model = StyleEncoderMLP()
+        else:
+            model = StyleEncoderVgg()
+
+        return model
+
+    @staticmethod
+    def _make_reslayer(attn_type: str, base: int, num_layers: int):
+        if attn_type == "adain":
+            modules = [AdaINResBlock(base*8, base*8) for _ in range(num_layers)]
+        elif attn_type == "linear":
+            modules = [AdaINMLPResBlock(base*8, base*8) for _ in range(num_layers)]
+        elif attn_type == "sa":
+            modules = [SACatResBlock(base*8, base*8) for _ in range(num_layers)]
+        elif attn_type == "se":
+            modules = [SECatResBlock(base*8, base*8) for _ in range(num_layers)]
+
+        modules = nn.ModuleList(modules)
+
+        return modules
+
+    def forward(self,
+                x: torch.Tensor,
+                style: torch.Tensor) -> torch.Tensor:
+        ce, mid_layer_list = self.ce(x)
+        se = self.se(style)
+
+        if self.guide:
+            g1 = self.g_dec1(ce)
+
+        for layer in self.res:
+            ce = layer(ce, se)
+
+        if self.guide:
+            g2 = self.g_dec1(ce)
+
+        h = self.dec(ce, mid_layer_list)
+
+        if self.guide:
+            return h, g1, g2
+        else:
+            return h
+
+
+class Discriminator(nn.Module):
+    def __init__(self,
+                 in_ch=3,
+                 multi_pattern=3,
+                 base=64):
+
+        super(Discriminator, self).__init__()
+        self.cnns = nn.ModuleList()
+        for _ in range(multi_pattern):
+            self.cnns.append(self._make_nets(in_ch, base))
+        self.down = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)
+
+    @staticmethod
+    def _make_nets(in_ch: int, base: int):
+        model = nn.Sequential(
+            CBR(in_ch, base, 4, 2, 1, sn=True),
+            CBR(base, base*2, 4, 2, 1, sn=True),
+            CBR(base*2, base*4, 4, 2, 1, sn=True),
+            CBR(base*4, base*8, 4, 2, 1, sn=True),
+            spectral_norm(nn.Conv2d(base*8, 1, 1, 1, 0))
+        )
 
         return model
 

@@ -1,0 +1,56 @@
+train:
+  epoch: 1000
+  snapshot_interval: 2000
+  batchsize: 16
+  validsize: 4
+  out_guide: true
+
+dataset:
+  extension: ".png"
+  train_size: 224
+  valid_size: 256
+  color_space: "rgb"
+  line_space: "rgb"
+  line_method: ["xdog", "pencil", "blend"]
+
+model:
+  generator:
+    in_ch: 6
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    attn_type: "sa"
+    guide: false
+    num_layers: 4
+    mode: "train"
+  image_dis:
+    in_ch: 3
+    multi: 3
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    mode: "train"
+  surface_dis:
+    in_ch: 3
+    multi: 3
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    mode: "train"
+  texture_dis:
+    in_ch: 1
+    multi: 3
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    mode: "train"
+  vgg:
+    mode: "eval"
+
+loss:
+  content: 10.0
+  image: 0.0
+  surface: 1.0
+  texture: 1.0
+  structure: 200.0
+  tv: 5000.0

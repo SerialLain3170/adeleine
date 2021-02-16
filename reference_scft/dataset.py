@@ -5,9 +5,14 @@ import cv2 as cv
 from PIL import Image
 from torch.utils.data import Dataset
 from pathlib import Path
-from xdog import xdog_process
+from typing import List
+from typing_extensions import Literal
+
 from thin_plate_spline import warping_image
 from torchvision.transforms import ColorJitter
+from hint_processor import LineProcessor
+
+LineArt = List[Literal["xdog", "pencil", "digital", "blend"]]
 
 
 class IllustDataset(Dataset):
@@ -20,12 +25,24 @@ class IllustDataset(Dataset):
     def __init__(self,
                  data_path: Path,
                  sketch_path: Path,
-                 extension=".jpg"):
+                 line_method: LineArt,
+                 extension=".jpg",
+                 train_size=224,
+                 valid_size=256,
+                 color_space="rgb",
+                 line_space="rgb"):
 
         self.data_path = data_path
         self.pathlist = list(self.data_path.glob(f"**/*{extension}"))
         self.train_list, self.val_list = self._train_val_split(self.pathlist)
         self.train_len = len(self.train_list)
+
+        self.train_size = train_size
+        self.valid_size = valid_size
+
+        self.line_process = LineProcessor(sketch_path, line_method)
+        self.color_space = color_space
+        self.line_space = line_space
 
         self.sketch_path = sketch_path
         self.src_per = 0.2
@@ -43,54 +60,53 @@ class IllustDataset(Dataset):
             [-0.2, -0.2]
         ])
 
-    def _train_val_split(self, pathlist):
+    @staticmethod
+    def _train_val_split(pathlist: List) -> (List, List):
         split_point = int(len(pathlist) * 0.95)
         train = pathlist[:split_point]
         val = pathlist[split_point:]
 
         return train, val
 
-    def _coordinate(self, img):
-        img = img[:, :, ::-1]
-        img = (img.transpose(2, 0, 1) - 127.5) / 127.5
+    @staticmethod
+    def _coordinate(img: np.array,
+                    color_space: str) -> np.array:
+        if color_space == "yuv":
+            img = img.astype(np.uint8)
+            img = cv.cvtColor(img, cv.COLOR_BGR2YCrCb)
+            img = img.transpose(2, 0, 1).astype(np.float32)
+            img = (img - 127.5) / 127.5
+        elif color_space == "gray":
+            img = img.astype(np.uint8)
+            img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+            img = np.expand_dims(img, axis=0).astype(np.float32)
+            img = (img - 127.5) / 127.5
+        else:
+            img = img[:, :, ::-1].astype(np.float32)
+            img = (img.transpose(2, 0, 1) - 127.5) / 127.5
 
         return img
 
-    def _xdog_preprocess(self, path):
-        img = xdog_process(str(path))
-        img = (img * 255.0).reshape(img.shape[0], img.shape[1], 1)
-        img = np.tile(img, (1, 1, 3))
+    @staticmethod
+    def _totensor(array_list: List) -> torch.Tensor:
+        return torch.cuda.FloatTensor(np.array(array_list).astype(np.float32))
 
-        return img
+    @staticmethod
+    def _random_crop(line: np.array,
+                     color: np.array,
+                     size: int) -> (np.array, np.array):
+        scale = np.random.randint(288, 768)
+        line = cv.resize(line, (scale, scale))
+        color = cv.resize(color, (scale, scale))
 
-    def _pencil_preprocess(self, path):
-        filename = path.name
-        line_path = self.sketch_path / Path(filename)
-        img = cv.imread(str(line_path))
+        height, width = line.shape[0], line.shape[1]
+        rnd0 = np.random.randint(height - size - 1)
+        rnd1 = np.random.randint(width - size - 1)
 
-        return img
+        line = line[rnd0: rnd0 + size, rnd1: rnd1 + size]
+        color = color[rnd0: rnd0 + size, rnd1: rnd1 + size]
 
-    def _preprocess(self, path):
-        """Returns line art of color image
-           This class returns only sketchKeras
-        Parameters
-        ----------
-        path : Path
-            Path of color image
-        
-        Returns
-        -------
-        img: numpy.array
-            Line art of color image
-        """
-        #method = np.random.choice([pencil])
-
-        #if method == "xdog":
-        #    img = self._xdog_preprocess(path)
-        #elif method == "pencil":
-        img = self._pencil_preprocess(path)
-
-        return img
+        return line, color
 
     def _warp(self, img):
         const = self.src_const
@@ -109,6 +125,23 @@ class IllustDataset(Dataset):
 
         return img
 
+    def _preprocess(self, color, line):
+        """3 stages of preparation
+           - Crop
+           - Spatial & Color augmentation
+           - Coordination
+        """
+        line, color = self._random_crop(line, color, size=self.train_size)
+
+        jittered = self._jitter(color)
+        warped = self._warp(jittered)
+
+        jittered = self._coordinate(jittered, self.color_space)
+        warped = self._coordinate(warped, self.color_space)
+        line = self._coordinate(line, self.line_space)
+
+        return jittered, warped, line
+
     def valid(self, validsize):
         c_valid_box = []
         l_valid_box = []
@@ -116,13 +149,13 @@ class IllustDataset(Dataset):
         for index in range(validsize):
             color_path = self.val_list[index]
             color = cv.imread(str(color_path))
-            line = self._preprocess(color_path)
+            line = self.line_process(color_path)
 
             jitter = self._jitter(color)
             warp = self._warp(jitter)
 
-            color = self._coordinate(warp)
-            line = self._coordinate(line)
+            color = self._coordinate(warp, self.color_space)
+            line = self._coordinate(line, self.line_space)
 
             c_valid_box.append(color)
             l_valid_box.append(line)
@@ -132,10 +165,6 @@ class IllustDataset(Dataset):
 
         return color, line
 
-    @staticmethod
-    def _totensor(array_list):
-        return torch.cuda.FloatTensor(np.array(array_list).astype(np.float32))
-
     def __repr__(self):
         return f"dataset length: {self.train_len}"
 
@@ -143,11 +172,15 @@ class IllustDataset(Dataset):
         return self.train_len
 
     def __getitem__(self, idx):
+        # Color prepare
         color_path = self.train_list[idx]
         color = cv.imread(str(color_path))
-        line = self._preprocess(color_path)
 
-        return color, line
+        # Line prepare
+        line = self.line_process(color_path)
+        jit, war, line = self._preprocess(color, line)
+
+        return jit, war, line
 
 
 class IllustTestDataset(Dataset):

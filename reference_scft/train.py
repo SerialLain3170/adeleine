@@ -1,225 +1,200 @@
+import yaml
 import torch
 import torch.nn as nn
 import argparse
+import pprint
 
+from typing import List, Dict
 from pathlib import Path
 from tqdm import tqdm
-from model import Style2Paint, Discriminator, Vgg19
 from torch.utils.data import DataLoader
-from torchvision.transforms import ColorJitter
-from dataset import IllustDataset, LineCollator
-from evaluation import Visualizer
 
-maeloss = nn.L1Loss()
-mseloss = nn.MSELoss()
-softplus = nn.Softplus()
+from model import Generator, Discriminator, Vgg19
+from dataset import IllustDataset
+from loss import SCFTLossCalculator
+from visualize import Visualizer
+from utils import session
 
 
-class Style2paintsLossCalculator:
-    def __init__(self):
-        pass
+class Trainer:
+    def __init__(self,
+                 config,
+                 outdir,
+                 modeldir,
+                 data_path,
+                 sketch_path,
+                 ):
 
-    @staticmethod
-    def gram_matrix(y):
-        (b, ch, h, w) = y.size()
-        features = y.view(b, ch, w * h)
-        features_t = features.transpose(1, 2)
-        gram = features.bmm(features_t) / (ch * h * w)
-        return gram
+        self.train_config = config["train"]
+        self.data_config = config["dataset"]
+        model_config = config["model"]
+        self.loss_config = config["loss"]
 
-    @staticmethod
-    def content_loss(y, t):
-        return torch.mean(torch.abs(y-t))
+        self.outdir = outdir
+        self.modeldir = modeldir
 
-    @staticmethod
-    def adversarial_disloss(discriminator, y, t):
-        sum_loss = 0
-        fake_list = discriminator(y)
-        real_list = discriminator(t)
+        self.dataset = IllustDataset(data_path,
+                                     sketch_path,
+                                     self.data_config["line_method"],
+                                     self.data_config["extension"],
+                                     self.data_config["train_size"],
+                                     self.data_config["valid_size"],
+                                     self.data_config["color_space"],
+                                     self.data_config["line_space"])
+        print(self.dataset)
 
-        for fake, real in zip(fake_list, real_list):
-            loss = torch.mean(softplus(-real)) + torch.mean(softplus(fake))
-            sum_loss += loss
+        gen = Generator()
+        self.gen, self.gen_opt = self._setting_model_optim(gen,
+                                                           model_config["generator"])
 
-        return sum_loss
+        dis = Discriminator()
+        self.dis, self.dis_opt = self._setting_model_optim(dis,
+                                                           model_config["discriminator"])
 
-    @staticmethod
-    def adversarial_genloss(discriminator, y):
-        sum_loss = 0
-        fake_list = discriminator(y)
+        self.vgg = Vgg19(requires_grad=False)
+        self.vgg.cuda()
+        self.vgg.eval()
 
-        for fake in fake_list:
-            loss = torch.mean(softplus(-fake))
-            sum_loss += loss
-
-        return sum_loss
-
-    @staticmethod
-    def adversarial_hingedis(discriminator, y, t):
-        fake = discriminator(y)
-        real = discriminator(t)
-
-        fake_loss = nn.ReLU()(1.0 + fake).mean()
-        real_loss = nn.ReLU()(1.0 - real).mean()
-
-        return fake_loss + real_loss
+        self.lossfunc = SCFTLossCalculator()
+        self.visualizer = Visualizer(self.data_config["color_space"])
 
     @staticmethod
-    def adversarial_hingegen(discriminator, y):
-        fake = discriminator(y)
+    def _setting_model_optim(model: nn.Module,
+                             config: Dict):
+        model.cuda()
+        if config["mode"] == "train":
+            model.train()
+        elif config["mode"] == "eval":
+            model.eval()
 
-        return -fake.mean()
+        optimizer = torch.optim.Adam(model.parameters(),
+                                     lr=config["lr"],
+                                     betas=(config["b1"], config["b2"]))
+
+        return model, optimizer
 
     @staticmethod
-    def positive_enforcing_loss(y):
-        sum_loss = 0
-        batch, ch, h, w = y.size()
+    def _valid_prepare(dataset,
+                       validsize: int) -> List[torch.Tensor]:
 
-        for color in range(3):
-            perch = y[:, color, :, :]
-            mean = torch.mean(perch)
-            mean = mean * torch.ones_like(mean)
-            loss = torch.mean((perch-mean)**2)
-            sum_loss += loss
+        c_val, l_val = dataset.valid(validsize)
 
-        return -sum_loss
+        return [l_val, c_val]
 
-    def style_and_perceptual_loss(self, vgg, y, t):
-        sum_loss = 0
-        y_list = vgg(y)
-        t_list = vgg(t)
+    @staticmethod
+    def _build_dict(loss_dict: Dict[str, float],
+                    epoch: int,
+                    num_epochs: int) -> Dict[str, str]:
 
-        for index, (y_feat, t_feat) in enumerate(zip(y_list, t_list)):
-            batch, ch, h, w = y_feat.size()
+        report_dict = {}
+        report_dict["epoch"] = f"{epoch}/{num_epochs}"
+        for k, v in loss_dict.items():
+            report_dict[k] = f"{v:.6f}"
 
-            loss = maeloss(y_feat, t_feat)
-            sum_loss += loss
+        return report_dict
 
-            if index == 3:
-                gram_y = self.gram_matrix(y_feat)
-                gram_t = self.gram_matrix(t_feat)
-                style_loss = maeloss(gram_y, gram_t)
+    def _eval(self,
+              iteration: int,
+              validsize: int,
+              v_list: List[torch.Tensor]):
+        torch.save(self.gen.state_dict(),
+                   f"{self.modeldir}/generator_{iteration}.pt")
+        torch.save(self.dis.state_dict(),
+                   f"{self.modeldir}/discriminator_{iteration}.pt")
 
-        return 0.01 * sum_loss + 50.0 * style_loss
+        with torch.no_grad():
+            y = self.gen(v_list[0], v_list[1])
 
+        self.visualizer(v_list, y,
+                        self.outdir, iteration, validsize)
 
-def train(epochs,
-          interval,
-          batchsize,
-          validsize,
-          data_path,
-          sketch_path,
-          extension,
-          img_size,
-          outdir,
-          modeldir,
-          gen_learning_rate,
-          dis_learning_rate,
-          beta1,
-          beta2):
+    def _iter(self, data):
+        jit, war, line = data
+        jit = jit.cuda()
+        war = war.cuda()
+        line = line.cuda()
 
-    # Dataset Definition
-    dataset = IllustDataset(data_path, sketch_path, extension)
-    c_valid, l_valid = dataset.valid(validsize)
-    print(dataset)
-    collator = LineCollator(img_size)
+        loss = {}
 
-    # Model & Optimizer Definition
-    model = Style2Paint()
-    model.cuda()
-    model.train()
-    gen_opt = torch.optim.Adam(model.parameters(),
-                               lr=gen_learning_rate,
-                               betas=(beta1, beta2))
+        # Discriminator update
+        y = self.gen(line, war)
+        dis_loss = self.loss_config["adv"] * self.lossfunc.adversarial_disloss(self.dis,
+                                                                               y.detach(),
+                                                                               jit)
 
-    discriminator = Discriminator()
-    discriminator.cuda()
-    discriminator.train()
-    dis_opt = torch.optim.Adam(discriminator.parameters(),
-                               lr=dis_learning_rate,
-                               betas=(beta1, beta2))
+        self.dis_opt.zero_grad()
+        dis_loss.backward()
+        self.dis_opt.step()
 
-    vgg = Vgg19(requires_grad=False)
-    vgg.cuda()
-    vgg.eval()
+        # Generator update
+        y = self.gen(line, war)
+        adv_gen_loss = self.loss_config["adv"] * self.lossfunc.adversarial_genloss(self.dis,
+                                                                                   y)
+        con_loss = self.loss_config["content"] * self.lossfunc.content_loss(y, jit)
+        perceptual_loss, style_loss = self.lossfunc.style_and_perceptual_loss(self.vgg, y, jit)
+        perceptual_loss = self.loss_config["perceptual"] * perceptual_loss
+        style_loss = self.loss_config["style"] * style_loss
 
-    # Loss function definition
-    lossfunc = Style2paintsLossCalculator()
+        gen_loss = adv_gen_loss + con_loss + perceptual_loss + style_loss
 
-    # Visualizer definition
-    visualizer = Visualizer()
+        self.gen_opt.zero_grad()
+        gen_loss.backward()
+        self.gen_opt.step()
 
-    iteration = 0
+        loss["loss_adv_dis"] = dis_loss.item()
+        loss["loss_adv_gen"] = adv_gen_loss.item()
+        loss["loss_content"] = con_loss.item()
+        loss["loss_perceptual"] = perceptual_loss.item()
+        loss["loss_style"] = style_loss.item()
 
-    for epoch in range(epochs):
-        dataloader = DataLoader(dataset,
-                                batch_size=batchsize,
-                                shuffle=True,
-                                collate_fn=collator,
-                                drop_last=True)
-        progress_bar = tqdm(dataloader)
+        return loss
 
-        for index, data in enumerate(progress_bar):
-            iteration += 1
-            jit, war, line = data
+    def __call__(self):
+        iteration = 0
+        v_list = self._valid_prepare(self.dataset,
+                                     self.train_config["validsize"],
+                                     )
 
-            # Discriminator update
-            y = model(line, war)
-            loss = lossfunc.adversarial_disloss(discriminator, y.detach(), jit)
+        for epoch in range(self.train_config["epoch"]):
+            dataloader = DataLoader(self.dataset,
+                                    batch_size=self.train_config["batchsize"],
+                                    shuffle=True,
+                                    drop_last=True)
 
-            dis_opt.zero_grad()
-            loss.backward()
-            dis_opt.step()
+            with tqdm(total=len(self.dataset)) as pbar:
+                for index, data in enumerate(dataloader):
+                    iteration += 1
+                    loss_dict = self._iter(data)
+                    report_dict = self._build_dict(loss_dict,
+                                                   epoch,
+                                                   self.train_config["epoch"])
 
-            # Generator update
-            y = model(line, war)
-            loss = lossfunc.adversarial_genloss(discriminator, y)
-            loss += 10.0 * lossfunc.content_loss(y, jit)
-            loss += lossfunc.style_and_perceptual_loss(vgg, y, jit)
+                    pbar.update(self.train_config["batchsize"])
+                    pbar.set_postfix(**report_dict)
 
-            gen_opt.zero_grad()
-            loss.backward()
-            gen_opt.step()
-
-            if iteration % interval == 1:
-                torch.save(model.state_dict(), f"{modeldir}/model_{iteration}.pt")
-
-                with torch.no_grad():
-                    y = model(l_valid, c_valid)
-
-                c = c_valid.detach().cpu().numpy()
-                l = l_valid.detach().cpu().numpy()
-                y = y.detach().cpu().numpy()
-
-                visualizer(l, c, y, outdir, iteration, validsize)
-
-            print(f"iteration: {iteration} Loss: {loss.data}")
+                    if iteration % self.train_config["snapshot_interval"] == 1:
+                        self._eval(iteration,
+                                   self.train_config["validsize"],
+                                   v_list,
+                                   )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Style2Paint")
-    parser.add_argument("--e", type=int, default=1000, help="The number of epochs")
-    parser.add_argument("--i", type=int, default=2000, help="The interval of snapshot")
-    parser.add_argument("--b", type=int, default=16, help="batch size")
-    parser.add_argument('--v', type=int, default=12, help="valid size")
-    parser.add_argument('--ext', type=str, default='.jpg', help="extension of training images")
-    parser.add_argument('--size', type=int, default=256, help="size of training images")
-    parser.add_argument('--outdir', type=Path, default='outdir', help="output directory")
-    parser.add_argument('--modeldir', type=Path, default='modeldir', help="model output directory")
-    parser.add_argument('--lrgen', type=float, default=0.0001, help="learning rate of generator")
-    parser.add_argument('--lrdis', type=float, default=0.0002, help="learning rate of discriminator")
-    parser.add_argument('--b1', type=float, default=0.5, help="beta1 of discriminator")
-    parser.add_argument('--b2', type=float, default=0.999, help="beta2 of discriminator")
+    parser = argparse.ArgumentParser(description="SCFT")
+    parser.add_argument('--session', type=str, default='scft', help="session name")
     parser.add_argument('--data_path', type=Path, help="path containing color images")
     parser.add_argument('--sketch_path', type=Path, help="path containing sketch images")
     args = parser.parse_args()
 
-    outdir = args.outdir
-    outdir.mkdir(exist_ok=True)
+    outdir, modeldir = session(args.session)
 
-    modeldir = args.modeldir
-    modeldir.mkdir(exist_ok=True)
+    with open("param.yaml", "r") as f:
+        config = yaml.safe_load(f)
+        pprint.pprint(config)
 
-    train(args.e, args.i, args.b, args.v, args.data_path, args.sketch_path,
-          args.ext, args.size, outdir, modeldir, args.lrgen, args.lrdis,
-          args.b1, args.b2)
+    trainer = Trainer(config,
+                      outdir,
+                      modeldir,
+                      args.data_path,
+                      args.sketch_path)
+    trainer()
