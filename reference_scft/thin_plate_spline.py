@@ -124,34 +124,3 @@ def warping_image(img, c_src, c_dst):
     mapx, mapy = tps_grid_to_remap(grid, img.shape)
     
     return cv.remap(img, mapx, mapy, cv.INTER_CUBIC)
-
-
-if __name__ == "__main__":
-    img = cv.imread("/data/users/hasegawa/Dataset/face_getchu/a_face_getchu_95.png")
-    img = cv.resize(img, (128, 128))
-
-    c_src = np.array([
-        [-0.5, -0.5],
-        [0.5, -0.5],
-        [-0.5, 0.5],
-        [0.5, 0.5],
-        [0.2, -0.2],
-        [-0.2, 0.2],
-        [0.2, 0.2],
-        [-0.2, -0.2],
-    ])
-
-    c_src = c_src + np.random.uniform(-0.2, 0.2, (8, 2))
-    c_dst = c_src + np.random.uniform(-0.05, 0.05, (8, 2))
-
-    #c_dst = np.array([
-    #    [0., 0],
-    #    [1., 0],
-    #    [1, 1],
-    #    [0, 1],
-    #    [0.4, 0.4],
-    #    [0.6, 0.6],
-    #])
-
-    img = warping_image(img, c_src, c_dst)
-    img = cv.imwrite("./tps.png", img)
