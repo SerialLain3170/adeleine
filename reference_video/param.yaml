@@ -1,0 +1,47 @@
+train:
+    epoch: 1000
+    snapshot_interval: 2000
+    batchsize: 8
+    validsize: 7
+
+dataset:
+    extension: ".png"
+    train_size: 256
+    valid_size: 256
+    anime_dir:
+        - "rayearth1"
+        - "rayearth2"
+        - "rayearth3"
+        - "sakura1"
+    scale: 512
+    frame_range: 8
+
+model:
+    CTN:
+        num_layers: 4
+        lr: 0.0001
+        b1: 0.5
+        b2: 0.99
+        mode: "train"
+    TCN:
+        lr: 0.00001
+        b1: 0.5
+        b2: 0.99
+        mode: "train"
+    discriminator:
+        lr: 0.00001
+        b1: 0.5
+        b2: 0.99
+        mode: "train"
+    temporal_discriminator:
+        lr: 0.00001
+        b1: 0.5
+        b2: 0.99
+        mode: "train"
+
+loss:
+    content: 10.0
+    adv: 1.0
+    perceptual: 1.0
+    tv: 1000.0
+    constraint: 1.0

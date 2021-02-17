@@ -1,19 +1,20 @@
 import yaml
 import torch
-import torch.nn as nn
 import argparse
+import torch.nn as nn
+import numpy as np
 import pprint
 
+from typing import List, Dict
 from pathlib import Path
 from tqdm import tqdm
-from typing import List, Dict
 from torch.utils.data import DataLoader
 
-from model import Generator, Discriminator
+from model import ColorTransformNetwork, Discriminator, Vgg19
 from dataset import IllustDataset
 from visualize import Visualizer
-from loss import StyleAdaINLossCalculator
-from utils import session
+from loss import VideoColorizeLossCalculator
+from utils import session, sum_totensor
 
 
 class Trainer:
@@ -23,7 +24,7 @@ class Trainer:
                  modeldir,
                  data_path,
                  sketch_path,
-                 ):
+                 dist_path):
 
         self.train_config = config["train"]
         self.data_config = config["dataset"]
@@ -35,25 +36,29 @@ class Trainer:
 
         self.dataset = IllustDataset(data_path,
                                      sketch_path,
-                                     self.data_config["line_method"],
+                                     dist_path,
+                                     self.data_config["anime_dir"],
                                      self.data_config["extension"],
                                      self.data_config["train_size"],
                                      self.data_config["valid_size"],
-                                     self.data_config["color_space"],
-                                     self.data_config["line_space"])
+                                     self.data_config["scale"],
+                                     self.data_config["frame_range"])
         print(self.dataset)
 
-        gen = Generator(layers=model_config["generator"]["num_layers"],
-                        attn_type=model_config["generator"]["attn_type"])
+        gen = ColorTransformNetwork(layers=model_config["CTN"]["num_layers"])
         self.gen, self.gen_opt = self._setting_model_optim(gen,
-                                                           model_config["generator"])
+                                                           model_config["CTN"])
 
         dis = Discriminator()
         self.dis, self.dis_opt = self._setting_model_optim(dis,
                                                            model_config["discriminator"])
 
-        self.lossfunc = StyleAdaINLossCalculator
-        self.visualizer = Visualizer(self.data_config["color_space"])
+        self.vgg = Vgg19(requires_grad=False)
+        self.vgg.cuda()
+        self.vgg.eval()
+
+        self.lossfunc = VideoColorizeLossCalculator()
+        self.visualizer = Visualizer()
 
     @staticmethod
     def _setting_model_optim(model: nn.Module,
@@ -74,9 +79,9 @@ class Trainer:
     def _valid_prepare(dataset,
                        validsize: int) -> List[torch.Tensor]:
 
-        c_val, l_val = dataset.valid(validsize)
+        l_x_v, l_y0_v, l_y1_v, c_x_v, c_y0_v, c_y1_v, d_x_v, d_y0_v, d_y1_v = dataset.valid(validsize)
 
-        return [l_val, c_val]
+        return [l_x_v, l_y0_v, l_y1_v, c_x_v, c_y0_v, c_y1_v, d_x_v, d_y0_v, d_y1_v]
 
     @staticmethod
     def _build_dict(loss_dict: Dict[str, float],
@@ -95,49 +100,56 @@ class Trainer:
               validsize: int,
               v_list: List[torch.Tensor]):
         torch.save(self.gen.state_dict(),
-                   f"{self.modeldir}/generator_{iteration}.pt")
+                   f"{self.modeldir}/ctn_{iteration}.pt")
         torch.save(self.dis.state_dict(),
                    f"{self.modeldir}/discriminator_{iteration}.pt")
 
         with torch.no_grad():
-            y = self.gen(v_list[0], v_list[1])
+            y, ysim, ymid = self.gen(v_list[0], v_list[1], v_list[2],
+                                     v_list[6], v_list[7], v_list[8],
+                                     v_list[4], v_list[5])
 
-        self.visualizer(v_list, y,
+        self.visualizer(v_list, ysim, ymid, y,
                         self.outdir, iteration, validsize)
 
     def _iter(self, data):
-        color, line = data
-        color = color.cuda()
-        line = line.cuda()
+        l_x, l_y0, l_y1, c_x, c_y0, c_y1, d_x, d_y0, d_y1 = data
+        l_x, l_y0, l_y1, c_x, c_y0, c_y1, d_x, d_y0, d_y1 = sum_totensor(l_x, l_y0, l_y1, c_x, c_y0, c_y1, d_x, d_y0, d_y1)
 
         loss = {}
 
-        y = self.gen(line, color)
-        dis_loss = self.loss_config["adv"] * self.lossfunc.adversarial_disloss(self.dis,
-                                                                               y.detach(),
-                                                                               color)
+        y, ysim, ymid = self.gen(l_x, l_y0, l_y1,
+                                 d_x, d_y0, d_y1,
+                                 c_y0, c_y1)
+
+        dis_loss = self.loss_config["adv"] * self.lossfunc.adversarial_dis_loss(self.dis,
+                                                                            y,
+                                                                            c_x)
 
         self.dis_opt.zero_grad()
         dis_loss.backward()
         self.dis_opt.step()
 
-        y = self.gen(line, color)
-        gen_adv_loss = self.loss_config["adv"] * self.lossfunc.adversarial_genloss(self.dis,
-                                                                                   y)
-        content_loss = self.loss_config["content"] * self.lossfunc.content_loss(y,
-                                                                                color)
-        pef_loss = self.loss_config["pef"] * self.lossfunc.positive_enforcing_loss(y)
+        gen_adv_loss = self.loss_config["adv"] * self.lossfunc.adversarial_gen_loss(self.dis,
+                                                                                    y)
 
-        gen_loss = gen_adv_loss + content_loss + pef_loss
+        content_loss = self.loss_config["content"] * self.lossfunc.content_loss(y, c_x)
+        tv_loss = self.loss_config["tv"] * self.lossfunc.total_variation_loss(y)
+        lc_loss = self.loss_config["constraint"] * self.lossfunc.latent_constraint_loss(ysim, ymid, c_x)
+        perceptual_loss = self.loss_config["perceptual"] * self.lossfunc.perceptual_loss(self.vgg, y, c_x)
+
+        gen_loss = gen_adv_loss + content_loss + tv_loss + lc_loss + perceptual_loss
 
         self.gen_opt.zero_grad()
         gen_loss.backward()
         self.gen_opt.step()
 
-        loss["loss_adv_dis"] = dis_loss.item()
-        loss["loss_adv_gen"] = gen_adv_loss.item()
-        loss["loss_content"] = content_loss.item()
-        loss["loss_pef"] = pef_loss.item()
+        loss["loss_adv_dis"] = dis_loss
+        loss["loss_adv_gen"] = gen_adv_loss
+        loss["loss_content"] = content_loss
+        loss["loss_tv"] = tv_loss
+        loss["loss_constraint"] = lc_loss
+        loss["loss_perceptual"] = perceptual_loss
 
         return loss
 
@@ -172,10 +184,11 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="StyleAdaIN")
-    parser.add_argument('--session', type=str, default='adain', help="session name")
+    parser = argparse.ArgumentParser(description="CTN")
+    parser.add_argument('--session', type=str, default='ctn', help="session name")
     parser.add_argument('--data_path', type=Path, help="path containing color images")
     parser.add_argument('--sketch_path', type=Path, help="path containing sketch images")
+    parser.add_argument('--dist_path', type=Path, help="path containing distance field images")
     args = parser.parse_args()
 
     outdir, modeldir = session(args.session)
@@ -188,5 +201,6 @@ if __name__ == "__main__":
                       outdir,
                       modeldir,
                       args.data_path,
-                      args.sketch_path)
+                      args.sketch_path,
+                      args.dist_path)
     trainer()

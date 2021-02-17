@@ -1,21 +1,21 @@
 # Augmented-Self Reference and Dense Semantic Correspondence
 
 ## Summary
-![](https://github.com/SerialLain3170/Colorization/blob/master/reference_scft/data/concept.png)
+![](./data/concept.png)
 
 - This directory implements colorization with reference images based on [this paper](https://arxiv.org/pdf/2005.05207.pdf)
 
 
 ## Usage
 
-### Traning Phase
+### Training Phase
 Execute the command line below.
 
 ```bash
 $ python train.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH>
 ```
 - `DATA_PATH`: The name of the directory that contains color images
-- `SKETCH_PATH`: The name of the direcotyr that contains line arts obtained by SketchKeras
+- `SKETCH_PATH`: The name of the directory that contains line arts obtained by SketchKeras
 
 File names of `DATA_PATH` must correspond to those of `SKETCH_PATH`. The examples of dataset structures are as follows.
 
@@ -48,9 +48,9 @@ SKETCH_PATH - file1.jpg
 ```
 
 ## Result
-![](https://github.com/SerialLain3170/Colorization/blob/master/reference_scft/data/result1.png)
-![](https://github.com/SerialLain3170/Colorization/blob/master/reference_scft/data/result2.png)
-![](https://github.com/SerialLain3170/Colorization/blob/master/reference_scft/data/result3.png)
+![](./data/result1.png)
+![](./data/result2.png)
+![](./data/result3.png)
 
 - `AdaIN` corresponds to my implementation in `../reference_adain` and `SCFT` corresponds to this implementation
 - While `AdaIN` sprays, `SCFT` is able to colorize by recognizing correspondences between reference images and line arts

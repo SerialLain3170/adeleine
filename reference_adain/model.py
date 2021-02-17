@@ -2,11 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from typing import List
 from torch.nn import init
+from torch.nn.utils import spectral_norm
 from torchvision import models
 
 
-def weights_init_normal(m):
+# Initialization of model
+def weights_init_normal(m: nn.Module):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
         init.normal_(m.weight.data, 0.0, 0.02)
@@ -17,41 +20,11 @@ def weights_init_normal(m):
         init.constant_(m.bias.data, 0.0)
 
 
-def weights_init_xavier(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        init.xavier_normal_(m.weight.data, gain=0.02)
-    elif classname.find('Linear') != -1:
-        init.xavier_normal_(m.weight.data, gain=0.02)
-    elif classname.find('BatchNorm2d') != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
+def init_weights(net: nn.Module):
+    net.apply(weights_init_normal)
 
 
-def weights_init_kaiming(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
-    elif classname.find('Linear') != -1:
-        init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
-    elif classname.find('BatchNorm2d') != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
-
-
-def init_weights(net, init_type='normal'):
-    print('initialization method [%s]' % init_type)
-    if init_type == 'normal':
-        net.apply(weights_init_normal)
-    elif init_type == 'xavier':
-        net.apply(weights_init_xavier)
-    elif init_type == 'kaiming':
-        net.apply(weights_init_kaiming)
-    else:
-        raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
-
-
-def calc_mean_std(feat, eps=1e-5):
+def calc_mean_std(feat: torch.Tensor, eps=1e-5) -> (torch.Tensor, torch.Tensor):
     size = feat.size()
     N, C = size[:2]
     feat_var = feat.view(N, C, -1).var(dim=2) + eps
@@ -61,7 +34,8 @@ def calc_mean_std(feat, eps=1e-5):
     return feat_mean, feat_std
 
 
-def adain(content_feat, style_feat):
+def adain(content_feat: torch.Tensor,
+          style_feat: torch.Tensor) -> torch.Tensor:
     size = content_feat.size()
     style_mean, style_std = calc_mean_std(style_feat)
     content_mean, content_std = calc_mean_std(content_feat)
@@ -72,7 +46,8 @@ def adain(content_feat, style_feat):
     return normalized_feat * style_std.expand(size) + style_mean.expand(size)
 
 
-def adain_linear(content_feat, style_feat):
+def adain_linear(content_feat: torch.Tensor,
+                 style_feat: torch.Tensor) -> torch.Tensor:
     size = content_feat.size()
     style_mean, style_std = style_feat[:, :512], style_feat[:, 512:]
     style_mean = style_mean.unsqueeze(2).unsqueeze(3)
@@ -123,7 +98,7 @@ class Vgg19(nn.Module):
             for param in self.parameters():
                 param.requires_grad = False
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.layer == 'four':
             h = self.slice(x)
 
@@ -136,37 +111,88 @@ class Vgg19(nn.Module):
             h_relu3 = self.slice3(h_relu2)
             h_relu4 = self.slice4(h_relu3)
             h_relu5 = self.slice5(h_relu4)
-
-        return h_relu5
-
-
-class CBR(nn.Module):
-    def __init__(self, in_ch, out_ch, kernel, stride, pad, up=False):
-        super(CBR, self).__init__()
-
-        if up:
-            self.cbr = nn.Sequential(
-                nn.Upsample(scale_factor=2),
-                nn.Conv2d(in_ch, out_ch, kernel, stride, pad),
-                nn.InstanceNorm2d(out_ch),
-                nn.ReLU(inplace=True)
-            )
-
-        else:
-            self.cbr = nn.Sequential(
-                nn.Conv2d(in_ch, out_ch, kernel, stride, pad),
-                nn.InstanceNorm2d(out_ch),
-                nn.ReLU(inplace=True)
-            )
-
-    def forward(self, x):
-        h = self.cbr(x)
+            h = [h_relu1, h_relu2, h_relu3, h_relu4, h_relu5]
 
         return h
 
 
+# Basic components of generator and discriminator
+class CBR(nn.Module):
+    def __init__(self,
+                 in_ch: int,
+                 out_ch: int,
+                 kernel: int,
+                 stride: int,
+                 pad: int,
+                 up=False,
+                 norm="in",
+                 activ="lrelu",
+                 sn=False):
+
+        super(CBR, self).__init__()
+
+        modules = []
+        modules = self._preprocess(modules, up)
+        modules = self._conv(modules, in_ch, out_ch, kernel, stride, pad, sn)
+        modules = self._norm(modules, norm, out_ch)
+        modules = self._activ(modules, activ)
+
+        self.cbr = nn.ModuleList(modules)
+
+    @staticmethod
+    def _preprocess(modules: List, up: bool) -> List:
+        if up:
+            modules.append(nn.Upsample(scale_factor=2, mode="bilinear"))
+
+        return modules
+
+    @staticmethod
+    def _conv(modules: List,
+              in_ch: int,
+              out_ch: int,
+              kernel: int,
+              stride: int,
+              pad: int,
+              sn: bool) -> List:
+        if sn:
+            modules.append(spectral_norm(nn.Conv2d(in_ch, out_ch, kernel, stride, pad)))
+        else:
+            modules.append(nn.Conv2d(in_ch, out_ch, kernel, stride, pad))
+
+        return modules
+
+    @staticmethod
+    def _norm(modules: List,
+              norm: str,
+              out_ch: int) -> List:
+
+        if norm == "bn":
+            modules.append(nn.BatchNorm2d(out_ch))
+        elif norm == "in":
+            modules.append(nn.InstanceNorm2d(out_ch))
+
+        return modules
+
+    @staticmethod
+    def _activ(modules: List, activ: str) -> List:
+        if activ == "relu":
+            modules.append(nn.ReLU())
+        elif activ == "lrelu":
+            modules.append(nn.LeakyReLU())
+
+        return modules
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for layer in self.cbr:
+            x = layer(x)
+
+        return x
+
+
 class ResBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self,
+                 in_ch: int,
+                 out_ch: int):
         super(ResBlock, self).__init__()
 
         self.res = nn.Sequential(
@@ -177,19 +203,23 @@ class ResBlock(nn.Module):
             nn.InstanceNorm2d(out_ch)
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.res(x) + x
 
 
 class AdaINResBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self,
+                 in_ch: int,
+                 out_ch: int):
         super(AdaINResBlock, self).__init__()
 
         self.c0 = nn.Conv2d(in_ch, out_ch, 3, 1, 1)
         self.c1 = nn.Conv2d(out_ch, out_ch, 3, 1, 1)
         self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, x, z):
+    def forward(self,
+                x: torch.Tensor,
+                z: torch.Tensor) -> torch.Tensor:
         h = self.c0(x)
         h = self.relu(adain(h, z))
         h = self.c1(h)
@@ -199,14 +229,18 @@ class AdaINResBlock(nn.Module):
 
 
 class AdaINMLPResBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self,
+                 in_ch: int,
+                 out_ch: int):
         super(AdaINMLPResBlock, self).__init__()
 
         self.c0 = nn.Conv2d(in_ch, out_ch, 3, 1, 1)
         self.c1 = nn.Conv2d(out_ch, out_ch, 3, 1, 1)
         self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, x, z):
+    def forward(self,
+                x: torch.Tensor,
+                z: torch.Tensor) -> torch.Tensor:
         h = self.c0(x)
         h = self.relu(adain_linear(h, z))
         h = self.c1(h)
@@ -216,7 +250,9 @@ class AdaINMLPResBlock(nn.Module):
 
 
 class SACat(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self,
+                 in_ch: int,
+                 out_ch: int):
         super(SACat, self).__init__()
         self.c0 = nn.Conv2d(in_ch*2, out_ch, 1, 1, 0)
         self.c1 = nn.Conv2d(out_ch, out_ch, 1, 1, 0)
@@ -224,7 +260,9 @@ class SACat(nn.Module):
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x, extractor):
+    def forward(self,
+                x: torch.Tensor,
+                extractor: torch.Tensor) -> torch.Tensor:
         h = self.relu(self.c0(torch.cat([x, extractor], dim=1)))
         h = self.sigmoid(self.c1(h))
 
@@ -232,7 +270,9 @@ class SACat(nn.Module):
 
 
 class SECat(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self,
+                 in_ch: int,
+                 out_ch: int):
         super(SECat, self).__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.se = nn.Sequential(
@@ -242,7 +282,9 @@ class SECat(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, x, extractor):
+    def forward(self,
+                x: torch.Tensor,
+                extractor: torch.Tensor) -> torch.Tensor:
         batch, ch = x.size(0), x.size(1)
         x_pool = self.avg_pool(x).view(batch, ch)
         extractor = self.avg_pool(extractor).view(batch, ch)
@@ -252,7 +294,9 @@ class SECat(nn.Module):
 
 
 class SACatResBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self,
+                 in_ch: int,
+                 out_ch: int):
         super(SACatResBlock, self).__init__()
         self.c0 = nn.Conv2d(in_ch, out_ch, 3, 1, 1)
         self.bn0 = nn.BatchNorm2d(out_ch)
@@ -260,7 +304,9 @@ class SACatResBlock(nn.Module):
 
         self.relu = nn.ReLU()
 
-    def forward(self, x, extractor):
+    def forward(self,
+                x: torch.Tensor,
+                extractor: torch.Tensor) -> torch.Tensor:
         h = self.relu(self.bn0(self.c0(x)))
         h = h * self.sa(h, extractor)
 
@@ -268,7 +314,9 @@ class SACatResBlock(nn.Module):
 
 
 class SECatResBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self,
+                 in_ch: int,
+                 out_ch: int):
         super(SECatResBlock, self).__init__()
         self.cbr = nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, 1, 1),
@@ -277,42 +325,13 @@ class SECatResBlock(nn.Module):
         )
         self.se = SECat(out_ch, int(out_ch/16))
 
-    def forward(self, x, extracotr):
+    def forward(self,
+                x: torch.Tensor,
+                extracotr: torch.Tensor) -> torch.Tensor:
         h = self.cbr(x)
         h = h * self.se(h, extracotr)
 
         return h + x
-
-
-class ContentEncoder(nn.Module):
-    def __init__(self, base=64):
-        super(ContentEncoder, self).__init__()
-
-        self.c0 = CBR(3, base, 7, 1, 3)
-        self.c1 = CBR(base, base*2, 4, 2, 1)
-        self.c2 = CBR(base*2, base*4, 4, 2, 1)
-        self.c3 = CBR(base*4, base*8, 4, 2, 1)
-        self.c4 = CBR(base*8, base*8, 4, 2, 1)
-
-        self.res = nn.Sequential(
-            ResBlock(base*8, base*8),
-            ResBlock(base*8, base*8)
-        )
-
-    def forward(self, x):
-        mid_layer_list = []
-        h0 = self.c0(x)
-        h1 = self.c1(h0)
-        mid_layer_list.append(h1)
-        h2 = self.c2(h1)
-        mid_layer_list.append(h2)
-        h3 = self.c3(h2)
-        mid_layer_list.append(h3)
-        h4 = self.c4(h3)
-        mid_layer_list.append(h4)
-        h = self.res(h4)
-
-        return h, mid_layer_list
 
 
 class StyleEncoderVgg(nn.Module):
@@ -321,7 +340,7 @@ class StyleEncoderVgg(nn.Module):
 
         self.vgg = Vgg19(requires_grad=True)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.vgg(x)
 
 
@@ -339,7 +358,7 @@ class StyleEncoder(nn.Module):
             ResBlock(base*8, base*8)
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.enc(x)
 
 
@@ -366,7 +385,7 @@ class StyleEncoderMLP(nn.Module):
             nn.Linear(base*8, base*16),
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.enc(x)
         h = self.pool(h).squeeze(3).squeeze(2)
         h = self.mlp(h)
@@ -374,82 +393,108 @@ class StyleEncoderMLP(nn.Module):
         return h
 
 
-class Decoder(nn.Module):
-    def __init__(self, base=64):
-        super(Decoder, self).__init__()
+class Generator(nn.Module):
+    def __init__(self,
+                 base=64,
+                 layers=4,
+                 attn_type="adain",
+                 ):
+        super(Generator, self).__init__()
 
-        self.c0 = CBR(base*16, base*8, 3, 1, 1, up=True)
-        self.c1 = CBR(base*16, base*4, 3, 1, 1, up=True)
-        self.c2 = CBR(base*8, base*2, 3, 1, 1, up=True)
-        self.c3 = CBR(base*4, base*2, 3, 1, 1, up=True)
+        self.attn_type = attn_type
+        self.ce = self._make_content_encoder(base)
+        self.se = self._make_style_encoder(attn_type)
+        self.res = self._make_reslayer(base, layers, attn_type)
+        self.dec = self._make_decoder(base)
         self.out = nn.Sequential(
             nn.Conv2d(base*2, 3, 7, 1, 3),
             nn.Tanh()
         )
 
-    def forward(self, x, mid_layer_list):
-        h = self.c0(torch.cat([x, mid_layer_list[-1]], dim=1))
-        h = self.c1(torch.cat([h, mid_layer_list[-2]], dim=1))
-        h = self.c2(torch.cat([h, mid_layer_list[-3]], dim=1))
-        h = self.c3(torch.cat([h, mid_layer_list[-4]], dim=1))
-        return self.out(h)
-
-        return h
-
-
-class Style2Paint(nn.Module):
-    def __init__(self, base=64, attn_type="adain"):
-        super(Style2Paint, self).__init__()
-
-        self.ce = ContentEncoder()
-        if attn_type == "linear":
-            self.se = StyleEncoderMLP()
-        else:
-            self.se = StyleEncoder()
-
-        if attn_type == "adain":
-            self.adain0 = AdaINResBlock(base*8, base*8)
-            self.adain1 = AdaINResBlock(base*8, base*8)
-            self.adain2 = AdaINResBlock(base*8, base*8)
-            self.adain3 = AdaINResBlock(base*8, base*8)
-        elif attn_type == "linear":
-            self.adain0 = AdaINMLPResBlock(base*8, base*8)
-            self.adain1 = AdaINMLPResBlock(base*8, base*8)
-            self.adain2 = AdaINMLPResBlock(base*8, base*8)
-            self.adain3 = AdaINMLPResBlock(base*8, base*8)
-        elif attn_type == "sa":
-            self.adain0 = SACatResBlock(base*8, base*8)
-            self.adain1 = SACatResBlock(base*8, base*8)
-            self.adain2 = SACatResBlock(base*8, base*8)
-            self.adain3 = SACatResBlock(base*8, base*8)
-        elif attn_type == "se":
-            self.adain0 = SECatResBlock(base*8, base*8)
-            self.adain1 = SECatResBlock(base*8, base*8)
-            self.adain2 = SECatResBlock(base*8, base*8)
-            self.adain3 = SECatResBlock(base*8, base*8)
-
-        self.dec = Decoder()
-
         init_weights(self.ce)
         init_weights(self.se)
-        init_weights(self.adain0)
-        init_weights(self.adain1)
-        init_weights(self.adain2)
-        init_weights(self.adain3)
+        init_weights(self.res)
         init_weights(self.dec)
+        init_weights(self.out)
 
-    def forward(self, x, style):
-        ce, mid_layer_list = self.ce(x)
-        se = self.se(style)
+    @staticmethod
+    def _make_content_encoder(base: int):
+        modules = []
+        modules.append(CBR(3, base, 7, 1, 3))
+        modules.append(CBR(base, base*2, 4, 2, 1))
+        modules.append(CBR(base*2, base*4, 4, 2, 1))
+        modules.append(CBR(base*4, base*8, 4, 2, 1))
+        modules.append(CBR(base*8, base*8, 4, 2, 1))
+        modules.append(ResBlock(base*8, base*8))
+        modules.append(ResBlock(base*8, base*8))
 
-        h = self.adain0(ce, se)
-        h = self.adain1(h, se)
-        h = self.adain2(h, se)
-        h = self.adain3(h, se)
+        return nn.ModuleList(modules)
 
-        h = self.dec(h, mid_layer_list)
+    @staticmethod
+    def _make_style_encoder(attn_type):
+        if attn_type == "linear":
+            return StyleEncoderMLP()
+        else:
+            return StyleEncoder()
 
-        return h
+    @staticmethod
+    def _make_reslayer(base: int, layers: int, attn_type: str):
+        if attn_type == "adain":
+            modules = [AdaINResBlock(base*8, base*8) for _ in range(layers)]
+        elif attn_type == "linear":
+            modules = [AdaINMLPResBlock(base*8, base*8) for _ in range(layers)]
+        if attn_type == "sa":
+            modules = [SACatResBlock(base*8, base*8) for _ in range(layers)]
+        if attn_type == "se":
+            modules = [SECatResBlock(base*8, base*8) for _ in range(layers)]
+
+        return nn.ModuleList(modules)
+
+    @staticmethod
+    def _make_decoder(base: int):
+        modules = []
+        modules.append(CBR(base*16, base*8, 3, 1, 1, up=True))
+        modules.append(CBR(base*16, base*4, 3, 1, 1, up=True))
+        modules.append(CBR(base*8, base*2, 3, 1, 1, up=True))
+        modules.append(CBR(base*4, base*2, 3, 1, 1, up=True))
+
+        return nn.ModuleList(modules)
+
+    def _content_encode(self, x: torch.Tensor) -> (torch.Tensor, [torch.Tensor]):
+        encode_list = []
+        for i, layer in enumerate(self.ce):
+            x = layer(x)
+            if i in [1, 2, 3, 4]:
+                encode_list.append(x)
+
+        return x, encode_list
+
+    def _res(self,
+             x: torch.Tensor,
+             s: torch.Tensor) -> torch.Tensor:
+        for layer in self.res:
+            x = layer(x, s)
+
+        return x
+
+    def _decode(self,
+                x: torch.Tensor,
+                encode_list: List[torch.Tensor]) -> torch.Tensor:
+        for i, layer in enumerate(self.dec):
+            x = layer(torch.cat([x, encode_list[-i-1]], dim=1))
+
+        return self.out(x)
+
+    def forward(self,
+                x: torch.Tensor,
+                s: torch.Tensor) -> torch.Tensor:
+        x, mid_layer_list = self._content_encode(x)
+        se = self.se(s)
+
+        x = self._res(x, se)
+        x = self._decode(x, mid_layer_list)
+
+        return x
 
 
 class Discriminator(nn.Module):
@@ -460,7 +505,7 @@ class Discriminator(nn.Module):
             self.cnns.append(self._make_nets(base))
         self.down = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)
 
-    def _make_nets(self, base):
+    def _make_nets(self, base: int):
         model = nn.Sequential(
             CBR(3, base, 4, 2, 1),
             CBR(base, base*2, 4, 2, 1),
@@ -474,7 +519,7 @@ class Discriminator(nn.Module):
 
         return model
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         outputs = []
         for model in self.cnns:
             h = model(x)
