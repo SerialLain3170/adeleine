@@ -1,20 +1,20 @@
 # Colorization With Reference Images By Using AdaIN
 
 ## Summary
-![](https://github.com/SerialLain3170/Colorization/blob/master/reference_adain/data/generator.png)
+![](./data/generator.png)
 
-- This directory implements colorization with reference images by using Adaptive Instance Normalization(AdaIN).
+- This directory implements colorization with reference images with Adaptive Instance Normalization(AdaIN).
 
 ## Usage
 
-### Traning Phase
+### Training Phase
 Execute the command line below.
 
 ```bash
 $ python train.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH>
 ```
 - `DATA_PATH`: The name of the directory that contains color images
-- `SKETCH_PATH`: The name of the direcotyr that contains line arts obtained by SketchKeras
+- `SKETCH_PATH`: The name of the directory that contains line arts obtained by SketchKeras
 
 File names of `DATA_PATH` must correspond to those of `SKETCH_PATH`. The examples of dataset structures are as follows.
 
@@ -47,6 +47,6 @@ SKETCH_PATH - file1.jpg
 ```
 
 ## Result
-![](https://github.com/SerialLain3170/Colorization/blob/master/reference_adain/data/res1.png)
-![](https://github.com/SerialLain3170/Colorization/blob/master/reference_adain/data/res2.png)
-![](https://github.com/SerialLain3170/Colorization/blob/master/reference_adain/data/res3.png)
+![](./data/res1.png)
+![](./data/res2.png)
+![](./data/res3.png)

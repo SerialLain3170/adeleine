@@ -59,7 +59,7 @@ DIST_PATH - anime_dir1 - 0.jpg
 Execute the command line below.
 
 ```bash
-$ python train.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH> --dist_path <DIST_PATH> --pre_path <PRETRAIN_PATH
+$ python refine.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH> --dist_path <DIST_PATH> --pre_path <PRETRAIN_PATH>
 ```
 - Descriptions
     - `DATA_PATH`: The name of the directory that contains color images
