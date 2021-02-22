@@ -68,8 +68,9 @@ Considering the application systems of colorization, we need to colorize with de
 
 ### Methods
 - [x] userhint
-- [ ] whitebox
-- [ ] gaugan
+- [ ] userhint v2
+- [x] whitebox
+- [x] spade
 
 ### Results
 - userhint
@@ -77,6 +78,9 @@ Considering the application systems of colorization, we need to colorize with de
 
 - whitebox
 ![](./atari_whitebox/data/result2.png)
+
+- spade
+![](./atari_spade/data/result1.png)
 
 ## Experiment with reference
 
@@ -86,7 +90,7 @@ I also consider taking the hint, named reference, as input of neural network. At
 ### Methods
 - [x] adain
 - [x] scft
-- [ ] video
+- [x] video
 
 ### Result
 - adain

@@ -1,4 +1,4 @@
-# White Box Colorization
+# SPADE Colorization
 
 ## Summary
 ![](./data/concept.png)
@@ -11,11 +11,10 @@
 Execute the command line below.
 
 ```bash
-$ python train.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH> --ss_path <SS_PATH>
+$ python train.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH>
 ```
 - `DATA_PATH`: The name of the directory that contains color images
 - `SKETCH_PATH`: The name of the directory that contains line arts obtained by SketchKeras
-- `SS_PATH`: The name of the directory that contains quantized color images
 
 File names of `DATA_PATH` must correspond to those of `SKETCH_PATH`. The examples of dataset structures are as follows.
 
@@ -29,10 +28,6 @@ DATA_PATH - file1.jpg
 SKETCH_PATH - file1.jpg
             - file2.jpg
             ...
-
-SS_PATH - file1.jpg
-        - file2.jpg
-        ...
 ```
 
 ```
@@ -49,12 +44,6 @@ SKETCH_PATH - file1.jpg
             - file3.jpg
             - file4.jpg
             ...
-
-SS_PATH - file1.jpg
-        - file2.jpg
-        - file3.jpg
-        - file4.jpg
-        ...
 ```
 
 ## Results
