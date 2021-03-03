@@ -1,0 +1,69 @@
+train:
+  epoch: 1000
+  snapshot_interval: 2000
+  batchsize: 16
+  validsize: 5
+  train_type: "flat"
+  l_dim: 8
+
+inference:
+  mode: multi
+
+dataset:
+  extension: ".png"
+  train_size: 256
+  valid_size: 256
+  color_space: "rgb"
+  line_space: "rgb"
+  line_method: ["xdog", "pencil", "blend"]
+
+model:
+  flat_generator:
+    in_ch: 6
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    attn_type: "sa"
+    num_layers: 4
+    mode: "train"
+  flat_dis:
+    in_ch: 3
+    multi: 3
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    mode: "train"
+  bicycle_gan:
+    in_ch: 3
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    l_dim: 8
+    num_layers: 4
+    mode: "train"
+  bicycle_dis:
+    in_ch: 3
+    multi: 3
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    mode: "train"
+  encoder:
+    in_ch: 6
+    l_dim: 8
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    mode: "train"
+  vgg:
+    mode: "eval"
+
+loss:
+  content: 10.0
+  adv: 1.0
+  texture: 1.0
+  perceptual: 10000.0
+  tv: 1000.0
+  latent: 0.5
+  kl: 0.01
+  ms: 1.0
