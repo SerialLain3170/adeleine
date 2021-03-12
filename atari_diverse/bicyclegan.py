@@ -119,7 +119,7 @@ class CBR(nn.Module):
         if norm == "bn":
             modules.append(nn.BatchNorm2d(out_ch))
         elif norm == "in":
-            modules.append(nn.BatchNorm2d(out_ch))
+            modules.append(nn.InstanceNorm2d(out_ch))
 
         return modules
 
@@ -137,6 +137,26 @@ class CBR(nn.Module):
             x = layer(x)
 
         return x
+
+
+class ResBlock(nn.Module):
+    def __init__(self,
+                 in_ch: int,
+                 out_ch: int):
+
+        super(ResBlock, self).__init__()
+        self.c0 = nn.Conv2d(in_ch, out_ch, 3, 1, 1)
+        self.c1 = nn.Conv2d(out_ch, out_ch, 3, 1, 1)
+
+        self.n0 = nn.InstanceNorm2d(out_ch)
+        self.n1 = nn.InstanceNorm2d(out_ch)
+        self.relu = nn.LeakyReLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.relu(self.n0(self.c0(x)))
+        h = self.relu(self.n1(self.c1(h)))
+
+        return h + x
 
 
 class SACat(nn.Module):
@@ -176,7 +196,7 @@ class SACatResBlock(nn.Module):
         self.bn0 = nn.InstanceNorm2d(out_ch)
         self.sa = SACat(out_ch, out_ch, latent_dim)
 
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU()
 
     def forward(self,
                 x: torch.Tensor,
@@ -205,7 +225,7 @@ class LatentEncoder(nn.Module):
 
         self.mlp = nn.Sequential(
             nn.Linear(base*8, base*2),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Linear(base*2, latent_dim)
         )
 
@@ -219,13 +239,118 @@ class LatentEncoder(nn.Module):
 
 
 class MaskEncoder(nn.Module):
-    def __init__(self):
+    def __init__(self, mid_ch: int):
         super(MaskEncoder, self).__init__()
 
         self.vgg = Vgg19(requires_grad=False)
+        self.res = nn.Sequential(
+            ResBlock(mid_ch, mid_ch),
+            ResBlock(mid_ch, mid_ch)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.vgg(x)
+        return self.res(self.vgg(x))
+
+
+class ColorFixer(nn.Module):
+    def __init__(self,
+                 base=64):
+        super(ColorFixer, self).__init__()
+        self.enc = self._make_encoder(base)
+        self.dec = self._make_decoder(base)
+        self.res = nn.Sequential(
+            ResBlock(base*8, base*8),
+            ResBlock(base*8, base*8),
+            ResBlock(base*8, base*8),
+            ResBlock(base*8, base*8)
+        )
+        self.out = nn.Sequential(
+            nn.Conv2d(base, 3, 3, 1, 1),
+            nn.Tanh()
+        )
+
+    @staticmethod
+    def _make_encoder(base: int):
+        modules = []
+        modules.append(CBR(3, base, 4, 2, 1))
+        modules.append(CBR(base, base*2, 4, 2, 1))
+        modules.append(CBR(base*2, base*4, 4, 2, 1))
+        modules.append(CBR(base*4, base*8, 4, 2, 1))
+
+        return nn.ModuleList(modules)
+
+    @staticmethod
+    def _make_decoder(base: int):
+        modules = []
+        modules.append(CBR(base*16, base*4, 3, 1, 1, up=True))
+        modules.append(CBR(base*8, base*2, 3, 1, 1, up=True))
+        modules.append(CBR(base*4, base, 3, 1, 1, up=True))
+        modules.append(CBR(base*2, base, 3, 1, 1, up=True))
+
+        return nn.ModuleList(modules)
+
+    def _enc(self,
+             x: torch.Tensor) -> (torch.Tensor, List[torch.Tensor]):
+        encode_list = []
+        for layer in self.enc:
+            x = layer(x)
+            encode_list.append(x)
+
+        return x, encode_list
+
+    def _dec(self,
+             x: torch.Tensor,
+             encode_list: List[torch.Tensor]) -> torch.Tensor:
+        for i, layer in enumerate(self.dec):
+            x = layer(torch.cat([x, encode_list[-i-1]], dim=1))
+
+        return x
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x, encode_list = self._enc(x)
+        x = self.res(x)
+        x = self._dec(x, encode_list)
+
+        return self.out(x)
+
+
+class MappingNetwork(nn.Module):
+    def __init__(self,
+                 z_dim: int,
+                 in_ch: int,
+                 out_ch: int,
+                 num_layers=4):
+        super(MappingNetwork, self).__init__()
+
+        self.mapping = self._make_mapping(z_dim, in_ch, out_ch, num_layers)
+
+    @staticmethod
+    def _make_mapping(z_dim: int,
+                      in_ch: int,
+                      out_ch: int,
+                      num_layers: int):
+        modules = []
+
+        modules.append(CBR(in_ch + z_dim, out_ch, 3, 1, 1))
+        for _ in range(num_layers - 1):
+            modules.append(ResBlock(out_ch, out_ch))
+
+        return nn.ModuleList(modules)
+
+    def forward(self,
+                extractor: torch.Tensor,
+                z: torch.Tensor) -> torch.Tensor:
+
+        h, w = extractor.size(2), extractor.size(3)
+        z = z.unsqueeze(2).unsqueeze(3).repeat(1, 1, h, w)
+        for i, layer in enumerate(self.mapping):
+            if i == 0:
+                x = torch.cat([extractor, z], dim=1)
+                x = layer(x)
+            else:
+                x = layer(x)
+
+        return x
 
 
 class Generator(nn.Module):
@@ -238,10 +363,11 @@ class Generator(nn.Module):
 
         self.l_dim = latent_dim
 
-        self.mask_encoder = MaskEncoder()
+        self.mask_encoder = MaskEncoder(base*8)
         self.encoder = self._make_encoder(in_ch, base, latent_dim)
         self.resblock = self._make_resblock(num_layers, base, latent_dim)
         self.decoder = self._make_decoder(base)
+        #self.mapping = MappingNetwork(latent_dim, base*8, base*8, num_layers)
 
         init_weights(self.mask_encoder)
         init_weights(self.encoder)
@@ -306,7 +432,7 @@ class Generator(nn.Module):
 
     def _resblock(self, x: torch.Tensor,
                   extractor: torch.Tensor,
-                  z: torch) -> torch.Tensor:
+                  z: torch.Tensor) -> torch.Tensor:
 
         for layer in self.resblock:
             x = layer(x, extractor, z)
@@ -336,6 +462,7 @@ class Generator(nn.Module):
         extractor = self.mask_encoder(m)
         enc_list_copy = copy.copy(encode_list)
 
+        #m = self.mapping(extractor, z)
         h = self._resblock(encode_list[-1], extractor, z)
         h = self._decode(h, enc_list_copy)
 
@@ -352,7 +479,10 @@ class Discriminator(nn.Module):
         self.cnns = nn.ModuleList()
         for _ in range(multi_pattern):
             self.cnns.append(self._make_nets(in_ch, base))
-        self.down = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)
+        self.down = nn.AvgPool2d(3,
+                                 stride=2,
+                                 padding=[1, 1],
+                                 count_include_pad=False)
 
     @staticmethod
     def _make_nets(in_ch: int, base: int):

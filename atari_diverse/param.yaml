@@ -1,21 +1,21 @@
 train:
   epoch: 1000
   snapshot_interval: 2000
-  batchsize: 16
+  batchsize: 8
   validsize: 5
-  train_type: "flat"
+  train_type: "multi"
   l_dim: 8
 
 inference:
   mode: multi
 
 dataset:
-  extension: ".png"
+  extension: ".jpg"
   train_size: 256
   valid_size: 256
   color_space: "rgb"
   line_space: "rgb"
-  line_method: ["xdog", "pencil", "blend"]
+  line_method: ["xdog"]
 
 model:
   flat_generator:
@@ -55,6 +55,12 @@ model:
     b1: 0.5
     b2: 0.99
     mode: "train"
+  fixer:
+    in_ch: 3
+    lr: 0.0002
+    b1: 0.5
+    b2: 0.99
+    mode: "train"
   vgg:
     mode: "eval"
 
@@ -67,3 +73,4 @@ loss:
   latent: 0.5
   kl: 0.01
   ms: 1.0
+  fix: 10.0

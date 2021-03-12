@@ -9,9 +9,9 @@ from pathlib import Path
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
-from model import Generator, Discriminator, Vgg19
+from model import Generator, Vgg19
 from bicyclegan import Generator as BicycleGAN
-from bicyclegan import LatentEncoder
+from bicyclegan import LatentEncoder, ColorFixer, Discriminator
 from dataset import IllustDataset, DanbooruFacesDataset
 from visualize import Visualizer
 from utils import session, GuidedFilter
@@ -93,6 +93,10 @@ class Trainer:
             self.b_dis, self.b_dis_opt = self._setting_model_optim(b_dis,
                                                                    model_config["bicycle_dis"])
 
+            fixer = ColorFixer()
+            self.fix, self.fix_opt = self._setting_model_optim(fixer,
+                                                               model_config["fixer"])
+
         self.vgg = Vgg19(requires_grad=False)
         self.vgg.cuda()
         self.vgg.eval()
@@ -139,17 +143,23 @@ class Trainer:
         report_dict = {}
         report_dict["epoch"] = f"{epoch}/{num_epochs}"
         for k, v in loss_dict.items():
-            report_dict[k] = f"{v:.6f}"
+            report_dict[k] = f"{v:.4f}"
 
         return report_dict
 
     def _eval(self, iteration, validsize, v_list):
         if self.train_type == "flat":
             torch.save(self.flat_gen.state_dict(),
-                       f"{self.modeldir}/flat_{iteration}.pt")
+                       f"{self.modeldir}/flatter_{iteration}.pt")
+            torch.save(self.f_dis.state_dict(),
+                       f"{self.modeldir}/discriminator_{iteration}.pt")
         elif self.train_type == "multi":
             torch.save(self.b_gen.state_dict(),
-                       f"{self.modeldir}/bicyclegan_{iteration}.pt")
+                       f"{self.modeldir}/generator_{iteration}.pt")
+            torch.save(self.b_dis.state_dict(),
+                       f"{self.modeldir}/discriminator_{iteration}.pt")
+            torch.save(self.l_enc.state_dict(),
+                       f"{self.modeldir}/latent_encoder_{iteration}.pt")
 
         with torch.no_grad():
             if self.train_type == "flat":
@@ -220,19 +230,28 @@ class Trainer:
             flat = self.flat_gen(x, mask)
             flat = self.out_filter(line, flat)
 
-        z, y = self.b_gen(flat, mask)
+        z0, y0 = self.b_gen(flat, mask)
+        z1, y1 = self.b_gen(flat, mask)
+
+        y = torch.cat([y0, y1], dim=0)
+        z = torch.cat([z0, z1], dim=0)
+        x = torch.cat([x, x], dim=0)
+        mask = torch.cat([mask, mask], dim=0)
+        flat = torch.cat([flat, flat], dim=0)
+        color = torch.cat([color, color], dim=0)
+
         z_y = self.l_enc(torch.cat([y, flat], dim=1))
         z_t = self.l_enc(torch.cat([color, flat], dim=1))
         _, y_t = self.b_gen(flat, mask, z_t)
 
         # discriminate images themselves
         dis_loss = self.loss_config["adv"] * self.lossfunc.adversarial_hingedis(self.b_dis,
-                                                                            y.detach(),
-                                                                            color)
+                                                                                y.detach(),
+                                                                                color)
 
         dis_loss += self.loss_config["adv"] * self.lossfunc.adversarial_hingedis(self.b_dis,
-                                                                             y_t.detach(),
-                                                                             color)
+                                                                                 y_t.detach(),
+                                                                                 color)
 
         self.b_dis_opt.zero_grad()
         dis_loss.backward()
@@ -240,28 +259,32 @@ class Trainer:
 
         # generator & latent encoder update
         adv_gen_loss = self.loss_config["adv"] * self.lossfunc.adversarial_hingegen(self.b_dis,
-                                                                            y)
+                                                                                    y)
 
         adv_gen_loss += self.loss_config["adv"] * self.lossfunc.adversarial_hingegen(self.b_dis,
-                                                                             y_t)
+                                                                                     y_t)
 
-        # latent constrain
         kl_loss = self.loss_config["kl"] * self.lossfunc.kl_loss(z_t)
         content_loss = self.loss_config["content"] * self.lossfunc.content_loss(y_t, color)
+        perceptual_loss = self.loss_config["perceptual"] * self.lossfunc.perceptual_loss(self.vgg, y_t, color)
+        color_loss = self.loss_config["fix"] * self.lossfunc.color_regularize(self.fix,
+                                                                              y, flat)
 
         self.b_gen_opt.zero_grad()
         self.l_enc_opt.zero_grad()
-        gen_loss = adv_gen_loss + kl_loss + content_loss
+        self.fix_opt.zero_grad()
+        gen_loss = adv_gen_loss + kl_loss + content_loss + perceptual_loss + color_loss
         gen_loss.backward(retain_graph=True)
         if self.loss_config["latent"] > 0:
             self._set_requires_grad(self.l_enc, False)
             latent_loss = self.loss_config["latent"] * self.lossfunc.latent_constrain_loss(z, z_y)
-            ms_loss = self.loss_config["ms"] * self.lossfunc.mode_seeking_regularize(y, z)
+            ms_loss = self.loss_config["ms"] * self.lossfunc.mode_seeking_regularize(y0, y1, z0, z1)
             enc_loss = latent_loss + ms_loss
             enc_loss.backward()
             self._set_requires_grad(self.l_enc, True)
         self.b_gen_opt.step()
         self.l_enc_opt.step()
+        self.fix_opt.step()
 
         loss["loss_adv_dis"] = dis_loss.item()
         loss["loss_adv_gen"] = adv_gen_loss.item()
@@ -269,6 +292,8 @@ class Trainer:
         loss["loss_content"] = content_loss.item()
         loss["loss_latent"] = latent_loss.item()
         loss["loss_ms"] = ms_loss.item()
+        loss["loss_perceptual"] = perceptual_loss.item()
+        loss["loss_fix"] = color_loss.item()
 
         return loss
 
@@ -297,16 +322,16 @@ class Trainer:
                     loss_dict = self._iter(data)
 
                     report_dict = self._build_dict(loss_dict,
-                                                    epoch,
-                                                    self.train_config["epoch"])
+                                                   epoch,
+                                                   self.train_config["epoch"])
 
                     pbar.update(self.train_config["batchsize"])
                     pbar.set_postfix(**report_dict)
 
                     if iteration % self.train_config["snapshot_interval"] == 1:
                         self._eval(iteration,
-                                    self.train_config["validsize"],
-                                    v_list)
+                                   self.train_config["validsize"],
+                                   v_list)
 
 
 if __name__ == "__main__":

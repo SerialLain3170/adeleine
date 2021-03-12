@@ -114,12 +114,21 @@ class DecomposeLossCalculator:
         return loss
 
     @staticmethod
-    def mode_seeking_regularize(y: torch.Tensor,
-                                z: torch.Tensor) -> torch.Tensor:
-        batchsize = y.size(0)
-        index = torch.randperm(batchsize).cuda()
+    def mode_seeking_regularize(y0: torch.Tensor,
+                                y1: torch.Tensor,
+                                z0: torch.Tensor,
+                                z1: torch.Tensor) -> torch.Tensor:
 
-        lz = torch.mean(torch.abs(y-y[index, :])) / (torch.mean(torch.abs(z-z[index, :])) + 1e-9)
+        lz = torch.mean(torch.abs(y0 - y1)) / (torch.mean(torch.abs(z0 - z1)) + 1e-9)
         loss = 1 / (lz + 1e-5)
 
         return loss
+
+    @staticmethod
+    def color_regularize(fixer: nn.Module,
+                         y: torch.Tensor,
+                         t: torch.Tensor) -> torch.Tensor:
+
+        y_flat = fixer(y)
+
+        return torch.mean(torch.abs(y_flat - t))

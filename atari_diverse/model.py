@@ -171,7 +171,7 @@ class CBR(nn.Module):
         if norm == "bn":
             modules.append(nn.BatchNorm2d(out_ch))
         elif norm == "in":
-            modules.append(nn.BatchNorm2d(out_ch))
+            modules.append(nn.InstanceNorm2d(out_ch))
 
         return modules
 
@@ -236,15 +236,16 @@ class AdaINMLPResBlock(nn.Module):
         self.c0 = nn.Conv2d(in_ch, out_ch, 3, 1, 1)
         self.c1 = nn.Conv2d(out_ch, out_ch, 3, 1, 1)
         self.relu = nn.ReLU(inplace=True)
+        self.sep = out_ch
 
     def forward(self,
                 x: torch.Tensor,
                 z: torch.Tensor) -> torch.Tensor:
 
         h = self.c0(x)
-        h = self.relu(adain_linear(h, z))
+        h = self.relu(adain_linear(h, z, self.sep))
         h = self.c1(h)
-        h = self.relu(adain_linear(h, z))
+        h = self.relu(adain_linear(h, z, self.sep))
 
         return h + x
 
