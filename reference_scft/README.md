@@ -52,5 +52,5 @@ SKETCH_PATH - file1.jpg
 ![](./data/result2.png)
 ![](./data/result3.png)
 
-- `AdaIN` corresponds to my implementation in `../reference_adain` and `SCFT` corresponds to this implementation
-- While `AdaIN` sprays, `SCFT` is able to colorize by recognizing correspondences between reference images and line arts
+- `AdaIN` corresponds to my implementation in `../reference_adain` and `SCFT` corresponds to this implementation.
+- While `AdaIN` sprays color on line arts, `SCFT` is able to colorize by recognizing correspondences between reference images and line arts

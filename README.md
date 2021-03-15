@@ -1,18 +1,14 @@
 # Automatic Line Art Colorization
 
 ## Introduction
-This repository implements automatic line art colorization. In addition to training the neural network with line arts only, this repository aims to colorize the line art with several types of hints. There are mainly four types of hints.
-
-- No hint
-  - description: Colorization without hint
-  - input: Line art only
+This repository implements automatic line art colorization. In addition to training the neural network with line arts only, this repository aims to colorize the line art with several types of hints. There are mainly three types of hints.
   
 - Atari
   - description: Colorization with hint that includes some lines in desired color (ex. PaintsChainer)
   - input: Line art and atari
   
 - Tag
-  - description: Colorzation with tag (ex. Tag2Pix)
+  - description: Colorization with tag (ex. Tag2Pix)
   - input: Line art and tag
   
 - Reference
@@ -20,7 +16,7 @@ This repository implements automatic line art colorization. In addition to train
   - input: Line art and reference image
   
 ## Line extraction method
-There are many kinds of line extraction methods, such as XDoG or SketchKeras. However, if we train the model on only one type of line art, trained model comes to overfit and cannot colorize another type of line art adequately. Therefore, like Tag2Pix, various kinds of line art are used as the input of neural network.
+There are many kinds of line extraction methods, such as XDoG or SketchKeras. If we train the model on only one type of line art, trained model comes to overfit and cannot colorize another type of line art properly. Therefore, like Tag2Pix, various kinds of line arts are used as the input of neural network.
 
 I use mainly three types of line art.
 
@@ -105,6 +101,9 @@ I also consider taking the hint, named reference, as input of neural network. At
 ![](./reference_video/data/rayearth1_color1.gif)
 
 ## Reference
+- [XDoG: An eXtended difference-of-Gaussians compendium including advanced image stylization](https://users.cs.northwestern.edu/~sco590/winnemoeller-cag2012.pdf)
+- [sketchKeras](https://github.com/lllyasviel/sketchKeras)
+- [Learning to Simplify: Fully Convolutional Networks for Rough Sketch Cleanup](https://esslab.jp/~ess/publications/SimoSerraSIGGRAPH2016.pdf)
 - [Image-to-Image Translation with Conditional Adversarial Networks](https://arxiv.org/pdf/1611.07004.pdf)
 - [High-Resolution Image Synthesis and Semantic Manipulation with Conditional GANs](https://arxiv.org/pdf/1711.11585.pdf)
 - [Toward Multimodal Image-to-Image Translation](https://arxiv.org/pdf/1711.11586.pdf)
@@ -117,3 +116,4 @@ I also consider taking the hint, named reference, as input of neural network. At
 - [Reference-Based Sketch Image Colorization using Augmented-Self Reference and Dense Semantic Correspondence](https://arxiv.org/pdf/2005.05207.pdf)
 - [Learning to Cartoonize Using White-box Cartoon Representations](https://github.com/SystemErrorWang/White-box-Cartoonization/blob/master/paper/06791.pdf)
 - [Deep Line Art Video Colorization with a Few References](https://arxiv.org/pdf/2003.10685.pdf)
+- [DanbooRegion: An Illustration Region Dataset](https://lllyasviel.github.io/DanbooRegion/paper/paper.pdf)

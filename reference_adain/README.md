@@ -3,7 +3,7 @@
 ## Summary
 ![](./data/generator.png)
 
-- This directory implements colorization with reference images with Adaptive Instance Normalization(AdaIN).
+- This directory implements colorization with reference images using Adaptive Instance Normalization(AdaIN).
 
 ## Usage
 

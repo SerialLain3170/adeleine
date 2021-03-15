@@ -7,7 +7,6 @@
 - This method includes two steps
   - Taking line arts and hints (atari) as the inputs, UNet-like neural network named Flatter outputs flattened images.
   - Taking flattend images and injecting noise, Generator colorizes diversely.
-- Improving diversity of the outputs of Generator is needed.
 
 ## Usage
 
@@ -42,3 +41,6 @@ $ python train.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH> --flat_pat
 ![](./data/flatten1.png)
 
 ### Generator Results
+![](./data/generator1.png)
+
+- Although Flatter succeeds in generating flatten images, Generator fails to generate enough diversely.
