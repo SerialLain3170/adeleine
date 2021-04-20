@@ -78,7 +78,7 @@ I also consider taking the hint, named reference, as input of neural network. At
 | Method | Result |
 | ---- | ---- |
 | adain | ![here](./reference_adain/data/res1.png)
-| scft | ![](./reference_scft/data/result2.png)
+| scft | ![](./reference_scft/data/result2.png)![](./reference_scft/data/result4.png)
 | video | ![](./reference_video/data/never_color1.gif)![](./reference_video/data/sakura1_color1.gif)![](./reference_video/data/rayearth1_color1.gif) |
 
 ## References

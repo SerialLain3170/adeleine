@@ -40,7 +40,9 @@ class Trainer:
                                      self.data_config["train_size"],
                                      self.data_config["valid_size"],
                                      self.data_config["color_space"],
-                                     self.data_config["line_space"])
+                                     self.data_config["line_space"],
+                                     self.data_config["src_perturbation"],
+                                     self.data_config["tgt_perturbation"])
         print(self.dataset)
 
         gen = Generator()
@@ -89,7 +91,7 @@ class Trainer:
         report_dict = {}
         report_dict["epoch"] = f"{epoch}/{num_epochs}"
         for k, v in loss_dict.items():
-            report_dict[k] = f"{v:.6f}"
+            report_dict[k] = f"{v:.4f}"
 
         return report_dict
 

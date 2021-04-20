@@ -1,16 +1,18 @@
 train:
     epoch: 1000
     snapshot_interval: 2000
-    batchsize: 8
+    batchsize: 4
     validsize: 12
 
 dataset:
-    extension: ".png"
-    train_size: 256
-    valid_size: 256
+    extension: ".jpg"
+    train_size: 384
+    valid_size: 512
     color_space: "rgb"
     line_space: "rgb"
     line_method: ["xdog", "pencil", "blend"]
+    src_perturbation: 0.5
+    tgt_perturbation: 0.2
 
 model:
     generator:
@@ -30,5 +32,5 @@ model:
 loss:
     content: 10.0
     adv: 1.0
-    perceptual: 0.01
+    perceptual: 10.0
     style: 50.0

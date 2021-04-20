@@ -30,7 +30,9 @@ class IllustDataset(Dataset):
                  train_size=224,
                  valid_size=256,
                  color_space="rgb",
-                 line_space="rgb"):
+                 line_space="rgb",
+                 src_perturbation=0.5,
+                 tgt_perturbation=0.2):
 
         self.data_path = data_path
         self.pathlist = list(self.data_path.glob(f"**/*{extension}"))
@@ -45,8 +47,8 @@ class IllustDataset(Dataset):
         self.line_space = line_space
 
         self.sketch_path = sketch_path
-        self.src_per = 0.2
-        self.tgt_per = 0.05
+        self.src_per = src_perturbation
+        self.tgt_per = tgt_perturbation
         self.thre = 50
 
         self.src_const = np.array([
@@ -62,7 +64,7 @@ class IllustDataset(Dataset):
 
     @staticmethod
     def _train_val_split(pathlist: List) -> (List, List):
-        split_point = int(len(pathlist) * 0.95)
+        split_point = int(len(pathlist) * 0.995)
         train = pathlist[:split_point]
         val = pathlist[split_point:]
 
@@ -95,7 +97,7 @@ class IllustDataset(Dataset):
     def _random_crop(line: np.array,
                      color: np.array,
                      size: int) -> (np.array, np.array):
-        scale = np.random.randint(288, 768)
+        scale = np.random.randint(396, 512)
         line = cv.resize(line, (scale, scale))
         color = cv.resize(color, (scale, scale))
 
@@ -222,8 +224,8 @@ class LineCollator:
     """
     def __init__(self,
                  img_size=224,
-                 src_perturbation=0.2,
-                 dst_perturbation=0.05,
+                 src_perturbation=0.5,
+                 dst_perturbation=0.2,
                  brightness=0.3,
                  contrast=0.5,
                  saturation=0.1,
@@ -371,7 +373,7 @@ class LineTestCollator:
 
     def _prepare(self, image_path, style_path, size=512):
         line = cv.imread(str(image_path))
-        line = cv.resize(line, (192, 256), interpolation=cv.INTER_CUBIC)
+        line = cv.resize(line, (512, 512), interpolation=cv.INTER_CUBIC)
         color = cv.imread(str(style_path))
 
         color = self._coordinate(color)
