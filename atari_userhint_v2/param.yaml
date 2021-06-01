@@ -1,0 +1,51 @@
+train:
+    epoch: 1000
+    snapshot_interval: 2000
+    batchsize: 8
+    validsize: 5
+    out_guide: true
+    gamma: 0.9
+
+dataset:
+    extension: ".png"
+    train_size: 512
+    valid_size: 512
+    color_space: "rgb"
+    line_space: "gray"
+    line_method: ["xdog", "pencil", "blend"]
+
+model:
+    generator:
+        base: 64
+        in_ch: 5
+        lr: 0.0005
+        b1: 0.0
+        b2: 0.99
+        guide: true
+        resnext: true
+        encoder_type: "res"
+        num_layers: 10
+        up_layers: [10, 5, 5, 3]
+        mode: "train"
+    discriminator:
+        base: 64
+        in_ch: 3
+        multi: 1
+        sn: false
+        resnext: true
+        patch: true
+        lr: 0.0005
+        b1: 0.0
+        b2: 0.99
+        mode: "train"
+    vgg:
+        mode: "eval"
+
+loss:
+    content: 1.0
+    adv: 0.1
+    tv: 100000.0
+    pef: 0.01
+    fm: 0.0
+    perceptual: 100000.0
+    gp: 1.0
