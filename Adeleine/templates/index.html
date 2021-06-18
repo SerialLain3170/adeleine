@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial_scale=1">
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+        <link rel="stylesheet" href="/static/home.css">
+        <title>{{ title }}</title>
+    </head>
+    <body link="FFFFFF" vlink="FFFFFF" alink="cbedff">
+        <section class="home">
+            <h1 class="title" style="text-align: center; font-size:90px; color: palegoldenrod;">{{ title }}</h1>
+            <p class="blank"></p>
+            <span class="sentence" style="font-size:36px; text-align: center; color: whitesmoke;">Please select colorization type</span>
+            <p class="blankafter"></p>
+            <table>
+                <tr>
+                <td><a href="/reference" target="_self"><button class="choose">Reference</button></a></td>
+                <td><a href="/flatten" target="_self"><button class="choose">Flatten</button></a></td>
+                <td><a href="/point" target="_self"><button class="choose">Point</button></a></td>
+                </tr>
+            </table>
+        </section>
+    </body>
+</html>

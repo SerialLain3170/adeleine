@@ -53,7 +53,7 @@ Considering the application systems of colorization, we need to colorize with de
 
 ### Methods
 - [x] userhint
-- [ ] userhint v2
+- [x] userhint v2
 - [x] whitebox
 - [x] spade
 
@@ -61,6 +61,7 @@ Considering the application systems of colorization, we need to colorize with de
 | Method | Result |
 | ---- | ---- |
 | userhint | ![here](./atari_userhint/data/result2.png) |
+| userhint v2 | ![](./atari_userhint_v2/data/11859.png) ![](./atari_userhint_v2/data/12008.png) |
 | whitebox | ![](./atari_whitebox/data/result2.png) |
 | spade | ![](./atari_spade/data/result1.png) |
 
@@ -81,6 +82,11 @@ I also consider taking the hint, named reference, as input of neural network. At
 | scft | ![](./reference_scft/data/result2.png)![](./reference_scft/data/result4.png)
 | video | ![](./reference_video/data/never_color1.gif)![](./reference_video/data/sakura1_color1.gif)![](./reference_video/data/rayearth1_color1.gif) |
 
+## GUI application
+![](./adeleine/data/screen_image.png)
+
+- A simple GUI application, named Adeleine, can be used!
+
 ## References
 - [XDoG: An eXtended difference-of-Gaussians compendium including advanced image stylization](https://users.cs.northwestern.edu/~sco590/winnemoeller-cag2012.pdf)
 - [sketchKeras](https://github.com/lllyasviel/sketchKeras)
@@ -91,6 +97,7 @@ I also consider taking the hint, named reference, as input of neural network. At
 - [Arbitrary Style Transfer in Real-time with Adaptive Instance Normalization](https://arxiv.org/pdf/1703.06868.pdf)
 - [Mode Seeking Generative Adversarial Networks for Diverse Image Synthesis](https://arxiv.org/pdf/1903.05628.pdf)
 - [Semantic Image Synthesis with Spatially-Adaptive Normalization](https://arxiv.org/pdf/1903.07291.pdf)
+- [Real-Time User-Guided Image Colorization with Learned Deep Priors](https://arxiv.org/pdf/1705.02999.pdf)
 - [Style Transfer for Anime Sketches with Enhanced Residual U-net and Auxiliary Classifier GAN](https://arxiv.org/pdf/1706.03319.pdf)
 - [Two-stage Sketch Colorization](http://www.cse.cuhk.edu.hk/~ttwong/papers/colorize/colorize.pdf)
 - [Tag2Pix: Line Art Colorization Using Text Tag With SECat and Changing Loss](https://openaccess.thecvf.com/content_ICCV_2019/papers/Kim_Tag2Pix_Line_Art_Colorization_Using_Text_Tag_With_SECat_and_ICCV_2019_paper.pdf)

@@ -80,17 +80,26 @@ $ python refine.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH> --dist_pa
 ## Result
 
 ### Yakusoku no Neverland
-![](./data/never_color1.gif)
-![](./data/never_color2.gif)
-![](./data/never_color3.gif)
+
+| Results |
+| ---- |
+| ![](./data/never_color1.gif) |
+| ![](./data/never_color2.gif) |
+| ![](./data/never_color3.gif) |
 
 ### Sakura Taisen
-![](./data/sakura1_color1.gif)
-![](./data/sakura1_color2.gif)
-![](./data/sakura1_color3.gif)
+
+| Results |
+| ---- |
+| ![](./data/sakura1_color1.gif) |
+| ![](./data/sakura1_color2.gif) |
+| ![](./data/sakura1_color3.gif) |
 
 
 ### Magic Knight Rayearth
-![](./data/rayearth1_color1.gif)
-![](./data/rayearth1_color2.gif)
-![](./data/rayearth1_color3.gif)
+
+| Results |
+| ---- |
+| ![](./data/rayearth1_color1.gif) |
+| ![](./data/rayearth1_color2.gif) |
+| ![](./data/rayearth1_color3.gif) |

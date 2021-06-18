@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial_scale=1">
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+        <link rel="stylesheet" href="/static/renders.css">
+        <title>{{ title }}</title>
+    </head>
+    <body>
+        <div class="title">
+            <h1 class="titlesentence" style="font-size:48px; color: palegoldenrod; text-align: left;">{{ title }}.Reference</h1>
+        </div>
+
+        <div class="prepare_reference">
+            <div class="inputline">
+                1. Select line art
+                <input type="file" class="upload_file" id="line" name="image_line" accept="image/png, image/jpeg">
+            </div>
+            <div class="inputreference">
+                2. Select reference
+                <input type="file" class="upload_file" id="ref" name="image_ref" accept="image/png, image/jpeg">
+            </div>
+        </div>
+
+        <div class="resulttable">
+            <image src="data:image/png;base64,{{ y }}" width="{{ w }}" height= "{{ h }}" class="line_result"></image>
+            <image src="data:image/png;base64,{{ y }}" width="{{ w }}" height= "{{ h }}" class="ref_result"></image>
+            <button type="submit" id="colorize" class="btn_reference"> > Colorize! </button>
+            <image src="data:image/png;base64,{{ y }}" width="{{ w }}" height= "{{ h }}" class="y_result"></image>
+        </div>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+        <script type="text/javascript" src="/static/reference.js"></script>
+        <script>
+            $(document).on("click", ".title", function() {
+                location.href="/";
+            })
+        </script>
+    </body>
+</html>

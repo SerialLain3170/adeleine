@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="Cache-Control" content="no-cache">
+        <meta http-equiv="Pragma" content="no-cache">
+        <meta http-equiv="Expires" content="0">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial_scale=1">
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+        <link rel="stylesheet" href="/static/renders.css">
+        <title>{{ title }}</title>
+    </head>
+    <body>
+        <div class="title">
+            <h1 class="titlesentence" style="font-size:48px; color: palegoldenrod; text-align: left;">{{ title }}.Point</h1>
+        </div>
+
+        <div class="prepare">
+            <form name="form1" action='/point/upload' method="post" enctype="multipart/form-data" style="text-align: center; color: white">
+                <div class="inputline">
+                    1. Select line art
+                    <input type="file" class="uploadline" id="line" name="image_line" accept="image/png, image/jpeg">
+                </div>
+            </form>
+        </div>
+
+        <div class="imagetable">
+            <div class="circle-palette">
+                <button class="palette" id="#2F4F4F" style="background: #2F4F4F;"></button>
+                <button class="palette" id="#778899" style="background: #778899;"></button>
+                <button class="palette" id="#A9A9A9" style="background: #A9A9A9;"></button>
+                <button class="palette" id="#DCDCDC" style="background: #DCDCDC;"></button>
+                <button class="palette" id="#0000BE" style="background: #00008B;"></button>
+                <button class="palette" id="#483D8B" style="background: #483D8B;"></button>
+                <button class="palette" id="#0000CD" style="background: #0000CD;"></button>
+                <button class="palette" id="#4169E1" style="background: #4169E1;"></button>
+                <button class="palette" id="#008BBB" style="background: #008BBB;"></button>
+                <button class="palette" id="#1E90FF" style="background: #1E90FF;"></button>
+                <button class="palette" id="#87CEFA" style="background: #87CEFA;"></button>
+                <button class="palette" id="#ADD8E6" style="background: #ADD8E6;"></button>
+                <button class="palette" id="#20B2AA" style="background: #20B2AA;"></button>
+                <button class="palette" id="#66CDAA" style="background: #66CDAA;"></button>
+                <button class="palette" id="#48D1CC" style="background: #48D1CC;"></button>
+                <button class="palette" id="#B0E0E6" style="background: #B0E0E6;"></button>
+                <button class="palette" id="#6B8E23" style="background: #6B8E23;"></button>
+                <button class="palette" id="#006400" style="background: #006400;"></button>
+                <button class="palette" id="#2E8B57" style="background: #2E8B57;"></button>
+                <button class="palette" id="#32CD32" style="background: #32CD32;"></button>
+                <button class="palette" id="#7FFFD4" style="background: #7FFFD4;"></button>
+                <button class="palette" id="#00FF7F" style="background: #00FF7F;"></button>
+                <button class="palette" id="#7FFF00" style="background: #7FFF00;"></button>
+                <button class="palette" id="#90EE90" style="background: #90EE90;"></button>
+                <button class="palette" id="#8B0080" style="background: #8B0080;"></button>
+                <button class="palette" id="#8A2BE2" style="background: #8A2BE2;"></button>
+                <button class="palette" id="#9370DB" style="background: #9370DB;"></button>
+                <button class="palette" id="#8B0000" style="background: #8B0000;"></button>
+                <button class="palette" id="#A52A2A" style="background: #A52A2A;"></button>
+                <button class="palette" id="#A0522D" style="background: #A0522D;"></button>
+                <button class="palette" id="#D2691E" style="background: #D2691E;"></button>
+                <button class="palette" id="#DC143C" style="background: #DC143C;"></button>
+                <button class="palette" id="#FF69B4" style="background: #FF69B4;"></button>
+                <button class="palette" id="#DA70D6" style="background: #DA70D6;"></button>
+                <button class="palette" id="#DDA0DD" style="background: #DDA0DD;"></button>
+                <button class="palette" id="#BC8F8F" style="background: #BC8F8F;"></button>
+                <button class="palette" id="#DB7093" style="background: #DB7093;"></button>
+                <button class="palette" id="#F08080" style="background: #F08080;"></button>
+                <button class="palette" id="#FFB6C1" style="background: #FFB6C1;"></button>
+                <button class="palette" id="#FF4500" style="background: #FF4500;"></button>
+                <button class="palette" id="#FF4F50" style="background: #FF4F50;"></button>
+                <button class="palette" id="#FF8C00" style="background: #FF8C00;"></button>
+                <button class="palette" id="#F4A460" style="background: #F4A460;"></button>
+                <button class="palette" id="#B8860B" style="background: #B8860B;"></button>
+                <button class="palette" id="#DAA520" style="background: #DAA520;"></button>
+                <button class="palette" id="#DEB887" style="background: #DEB887;"></button>
+                <button class="palette" id="#FFE4E1" style="background: #FFE4E1;"></button>
+                <button class="palette" id="#F0E68C" style="background: #F0E68C;"></button>
+                <button class="palette" id="#FAFAD2" style="background: #FAFAD2;"></button>
+                <button class="palette" id="#F5F5DC" style="background: #F5F5DC;"></button>
+                <button class="palette" id="#FFFFE0" style="background: #FFFFE0;"></button>
+                <button class="palette" id="#F5DEB3" style="background: #F5DEB3;"></button>
+                <button class="palette" id="#FFE4B5" style="background: #FFE4B5;"></button>
+                <button class="palette" id="#FFEBCD" style="background: #FFEBCD;"></button>
+                <button class="palette" id="#FAEBD7" style="background: #FAEBD7;"></button>
+                <button class="palette" id="#F0DDC3" style="background: #F0DDC3;"></button>
+                <button class="palette" id="#F0DDD0" style="background: #F0DDD0;"></button>
+                <button class="palette" id="#EEBB99" style="background: #EEBB99;"></button>
+                <button class="palette" id="#EAA98F" style="background: #EAA98F;"></button>
+                <button class="palette" id="#F7D9D6" style="background: #F7D9D6;"></button>
+                <button class="palette" id="#F7C39C" style="background: #F7C39C;"></button>
+                <button class="palette" id="#EAD0B6" style="background: #EAD0B6;"></button>
+                <button class="palette" id="#A6958D" style="background: #A6958D;"></button>
+                <button class="palette" id="#EAC3A9" style="background: #EAC3A9;"></button>
+                <button class="palette" id="#EBB285" style="background: #EBB285;"></button>
+                <button class="palette" id="#F7D0B6" style="background: #F7D0B6;"></button>
+                <button class="palette" id="#C3744D" style="background: #C3744D;"></button>
+                <button class="palette" id="#EAC3B6" style="background: #EAC3B6;"></button>
+                <button class="palette" id="#452A1D" style="background: #452A1D;"></button>
+                <button class="palette" id="#E0FFFF" style="background: #E0FFFF;"></button>
+                <button class="palette" id="#00FFFF" style="background: #00FFFF;"></button>
+                <button class="palette" id="#F9F9F9" style="background: #F9F9F9;"></button>
+                <button class="palette" id="#9ACD32" style="background: #9ACD32;"></button>
+                <button class="palette" id="#20B2EE" style="background: #20B2EE;"></button>
+                <button class="palette" id="#FFFF7F" style="background: #FFFF7F;"></button>
+                <button class="palette" id="#FFBF7F" style="background: #FFBF7F;"></button>
+                <button class="palette" id="#D70035" style="background: #D70035;"></button>
+                <button class="palette" id="#001E43" style="background: #001E43;"></button>
+                <button class="palette" id="#EAEEA2" style="background: #EAEEA2;"></button>
+                <button class="palette" id="#EFEFEF" style="background: #EFEFEF;"></button>
+                <button class="allclear" style="background: #ff7f7f;">All Clear</button>
+            </div>
+            <canvas id="canvas_line" src={{ url_for('static', filename=scrib) }} width="{{ w }}" height="{{ h }}"></canvas>
+
+            <button type="submit" id="colorize" class="btn_flat"> > Colorize! </button>
+
+            <image src="data:image/png;base64,{{ y }}" width="{{ w }}" height= "{{ h }}" class="y_result"></image>
+
+            <canvas id="canvas_points" width="{{ w }}" height="{{ h }}" hidden></canvas>
+            <canvas id="canvas_places" width="{{ w }}" height="{{ h }}" hidden></canvas>
+        </div>
+
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+        <script type="text/javascript" src="/static/point.js"></script>
+        <script>
+            $(document).on("click", ".title", function() {
+                location.href="/";
+            })
+        </script>
+    </body>
+</html>

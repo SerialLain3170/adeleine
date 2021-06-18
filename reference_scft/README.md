@@ -48,9 +48,12 @@ SKETCH_PATH - file1.jpg
 ```
 
 ## Result
-![](./data/result1.png)
-![](./data/result2.png)
-![](./data/result3.png)
+
+| Results |
+| ---- |
+| ![](./data/result1.png) |
+| ![](./data/result2.png) |
+| ![](./data/result3.png) |
 
 - `AdaIN` corresponds to my implementation in `../reference_adain` and `SCFT` corresponds to this implementation.
 - While `AdaIN` sprays color on line arts, `SCFT` is able to colorize by recognizing correspondences between reference images and line arts
@@ -58,5 +61,7 @@ SKETCH_PATH - file1.jpg
 ### 2021/04/20 added
 - More perturbation leads to dealing with more dynamic reference images
 
-![](./data/result4.png)
-![](./data/result5.png)
+| Results |
+| ---- |
+| ![](./data/result4.png) |
+| ![](./data/result5.png) |

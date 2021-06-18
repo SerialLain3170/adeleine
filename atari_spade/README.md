@@ -47,7 +47,10 @@ SKETCH_PATH - file1.jpg
 ```
 
 ## Results
-![](./data/result1.png)
-![](./data/result2.png)
+
+| Results |
+| ---- |
+| ![](./data/result1.png) |
+| ![](./data/result2.png) |
 
 - I think that colorization networks containing SPADE tend to fade colors...

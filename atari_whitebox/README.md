@@ -58,6 +58,9 @@ SS_PATH - file1.jpg
 ```
 
 ## Results
-![](./data/result1.png)
-![](./data/result2.png)
-![](./data/ablation.png)
+
+| Results |
+| ---- |
+| ![](./data/result1.png) |
+| ![](./data/result2.png) |
+| ![](./data/ablation.png) |

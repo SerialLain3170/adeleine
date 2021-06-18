@@ -47,6 +47,9 @@ SKETCH_PATH - file1.jpg
 ```
 
 ## Result
-![](./data/res1.png)
-![](./data/res2.png)
-![](./data/res3.png)
+
+| Results |
+| ---- |
+| ![](./data/res1.png) |
+| ![](./data/res2.png) |
+| ![](./data/res3.png) |

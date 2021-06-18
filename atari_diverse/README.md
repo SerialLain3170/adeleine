@@ -36,9 +36,12 @@ $ python train.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH> --flat_pat
 ## Results
 
 ### Flatter Results
-![](./data/flatten2.png)
-![](./data/flatten3.png)
-![](./data/flatten1.png)
+
+| Results |
+| ---- |
+| ![](./data/flatten2.png) |
+| ![](./data/flatten3.png) |
+| ![](./data/flatten1.png) |
 
 ### Generator Results
 ![](./data/generator1.png)

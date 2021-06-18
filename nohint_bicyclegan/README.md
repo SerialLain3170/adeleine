@@ -54,6 +54,9 @@ You have some options in training by rewriting `param.yaml`.
   - If you intend to train the model with another dimension of latent space, you should change `train.l_dim`, `model.generator.l_dim` and `model.encoder.l_dim`
 
 ## Results
-![](data/result1.png)
-![](data/result2.png)
-![](data/result3.png)
+
+| Results |
+| ---- |
+| ![](data/result1.png) |
+| ![](data/result2.png) |
+| ![](data/result3.png) |

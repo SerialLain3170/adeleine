@@ -12,12 +12,11 @@ $ python train.py --data_path <DATA_PATH> --sketch_path <SKETCH_PATH>
 `SKETCH_PATH`: The name of the directory that contains line art files obtained by SKetchKeras  
 
 ## Result
-- pix2pixHD nohint
-![](../Data/nohint_comparison.png)
 
-- pix2pixHD atari
-![](data/atari_result1.png)
-![](data/atari_result2.png)
+| Methods | Results |
+| ---- | ---- |
+| pix2pixHD nohint | ![](../Data/nohint_comparison.png) |
+| pix2pixHD atari | ![](data/atari_result1.png)![](data/atari_result2.png) |
 
 - Batch size: 16
 - Using Adam as optimizer
