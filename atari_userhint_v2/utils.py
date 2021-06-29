@@ -2,12 +2,14 @@ import torch
 import torch.nn as nn
 import shutil
 import datetime
+import cv2
+import numpy as np
 
 from pathlib import Path
 from torch.autograd import Variable
 
 
-def session(session_name):
+def session(session_name: str) -> (Path, Path):
     session_path = Path("session") / Path(session_name)
     if session_path.exists():
         dt = datetime.datetime.now()
@@ -103,3 +105,34 @@ class GuidedFilter(nn.Module):
         mean_b = self.boxfilter(b) / N
 
         return mean_A * x + mean_b
+
+
+def change_saturate(bgr_img: np.array) -> np.array:
+    alpha = np.random.uniform(1.0, 2.0)
+    hsvimage = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2HSV_FULL) # BGR->HSV
+    hsvf = hsvimage.astype(np.float32)
+    hsvf[:, :, 1] = np.clip(hsvf[:, :, 1] * alpha, 0, 255)
+    hsv8 = hsvf.astype(np.uint8)
+
+    img = cv2.cvtColor(hsv8, cv2.COLOR_HSV2BGR_FULL)
+
+    return img
+
+
+def double_change_saturate(bgr_img: np.array, st_img: np.array) -> (np.array, np.array):
+    alpha = np.random.uniform(1.0, 2.0)
+
+    def _change_saturate(img: np.array, alpha: float) -> np.array:
+        hsvimage = cv2.cvtColor(img, cv2.COLOR_BGR2HSV_FULL) # BGR->HSV
+        hsvf = hsvimage.astype(np.float32)
+        hsvf[:, :, 1] = np.clip(hsvf[:, :, 1] * alpha, 0, 255)
+        hsv8 = hsvf.astype(np.uint8)
+
+        img = cv2.cvtColor(hsv8, cv2.COLOR_HSV2BGR_FULL)
+
+        return img
+
+    bgr_img = _change_saturate(bgr_img, alpha)
+    st_img = _change_saturate(st_img, alpha)
+
+    return bgr_img, st_img
