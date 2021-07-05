@@ -1,0 +1,65 @@
+html {
+    font-family: "游ゴシック体", YuGothic, "游ゴシック Medium", "Yu Gothic Medium", "游ゴシック", "Yu Gothic", sans-serif;
+    color: #ffffff
+  }
+  
+body {
+    background-color: #131313;
+    background-size: 80px 80px;
+    background-image:
+    linear-gradient(rgba(51, 49, 48, 0.7) 1%, rgba(51, 49, 48, .7) 1%, transparent 1%,
+    transparent 99%, rgba(51, 49, 48, .7) 99%, rgba(51, 49, 48, .7) 100%),
+    linear-gradient(90deg, rgba(51, 49, 48, .7) 1%, rgba(51, 49, 48, .7) 1%, transparent 1%,
+    transparent 99%, rgba(51, 49, 48, .7) 99%, rgba(51, 49, 48, .7) 100%),
+    linear-gradient(transparent, transparent 25%, rgba(51, 49, 48, .4) 25%, rgba(51, 49, 48, .4) 26%, transparent 26%,
+    transparent 50%, rgba(51, 49, 48, .4) 50%, rgba(51, 49, 48, .4) 51%, transparent 51%,
+    transparent 75%, rgba(51, 49, 48, .4) 75%, rgba(51, 49, 48, .4) 76%, transparent 76%, transparent 100%),
+    linear-gradient(90deg, transparent, transparent 25%, rgba(51, 49, 48, .4) 25%, rgba(51, 49, 48, .4) 26%, transparent 26%,
+    transparent 50%, rgba(51, 49, 48, .4) 50%, rgba(51, 49, 48, .4) 51%, transparent 51%,
+    transparent 75%, rgba(51, 49, 48, .4) 75%, rgba(51, 49, 48, .4) 76%, transparent 76%, transparent 100%);
+}
+
+.home {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    -webkit-transform : translate(-50%,-50%);
+    transform : translate(-50%,-50%);
+}
+
+.choose {
+    display: inline-block;
+    text-decoration: none;
+    background: #FF99FF;
+    color: #FFF;
+    width: 120px;
+    height: 120px;
+    line-height: 120px;
+    border-radius: 50%;
+    text-align: center;
+    overflow: hidden;
+    box-shadow: 0px 0px 0px 5px #FF99FF;
+    border: dashed 1px #FFF;
+    transition: .4s;
+}
+
+.choose:hover {
+    background: #FF33FF;
+    box-shadow: 0px 0px 0px 5px #FF33FF;
+}
+
+p.blank {
+    margin-bottom: 2em;
+}
+
+p.blankafter {
+    margin-bottom: 6em;
+}
+
+span.sentence {
+    color: whitesmoke;
+}
+
+table {
+    margin: 0 auto;
+}

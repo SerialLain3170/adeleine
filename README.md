@@ -83,7 +83,7 @@ I also consider taking the hint, named reference, as input of neural network. At
 | video | ![](./reference_video/data/never_color1.gif)![](./reference_video/data/sakura1_color1.gif)![](./reference_video/data/rayearth1_color1.gif) |
 
 ## GUI application
-![](./Adeleine/data/screen_image.png)
+![](./Adeleine/data/result1.png)
 
 - A simple GUI application, named Adeleine, can be used!
 

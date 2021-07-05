@@ -1,4 +1,5 @@
 .DS_Store
 *.pyc
 
-Adeleine/static
+Adeleine/static/*.png
+Adeleine/static/colorjoe

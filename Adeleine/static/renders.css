@@ -1,0 +1,232 @@
+html {
+  font-family: "游ゴシック体", YuGothic, "游ゴシック Medium", "Yu Gothic Medium", "游ゴシック", "Yu Gothic", sans-serif;
+  color: #ffffff
+}
+
+body {
+  background-color: #131313;
+  background-size: 80px 80px;
+  background-image:
+  linear-gradient(rgba(51, 49, 48, 0.7) 1%, rgba(51, 49, 48, .7) 1%, transparent 1%,
+  transparent 99%, rgba(51, 49, 48, .7) 99%, rgba(51, 49, 48, .7) 100%),
+  linear-gradient(90deg, rgba(51, 49, 48, .7) 1%, rgba(51, 49, 48, .7) 1%, transparent 1%,
+  transparent 99%, rgba(51, 49, 48, .7) 99%, rgba(51, 49, 48, .7) 100%),
+  linear-gradient(transparent, transparent 25%, rgba(51, 49, 48, .4) 25%, rgba(51, 49, 48, .4) 26%, transparent 26%,
+  transparent 50%, rgba(51, 49, 48, .4) 50%, rgba(51, 49, 48, .4) 51%, transparent 51%,
+  transparent 75%, rgba(51, 49, 48, .4) 75%, rgba(51, 49, 48, .4) 76%, transparent 76%, transparent 100%),
+  linear-gradient(90deg, transparent, transparent 25%, rgba(51, 49, 48, .4) 25%, rgba(51, 49, 48, .4) 26%, transparent 26%,
+  transparent 50%, rgba(51, 49, 48, .4) 50%, rgba(51, 49, 48, .4) 51%, transparent 51%,
+  transparent 75%, rgba(51, 49, 48, .4) 75%, rgba(51, 49, 48, .4) 76%, transparent 76%, transparent 100%);
+}
+
+table {
+  margin: auto;
+}
+
+.prepare {
+  display: -webkit-flex;
+  display: flex;
+  position: absolute;
+  top: 18%;
+  left: 23%;
+}
+
+.prepare_reference {
+  display: -webkit-flex;
+  display: flex;
+  position: absolute;
+  top: 18%;
+  left: 12%;
+}
+
+.inputline {
+  display: inline-block;
+  overflow: hidden;
+  position: relative;
+  padding: 1em;
+  border: 1px solid #ff7f7f;
+  background: #ff7f7f;
+  color:#fff;
+  width: 200px;
+  height: 50px;
+  vertical-align: middle;
+}
+
+.inputline input[type="file"] {
+  opacity: 0;
+  filter: progid:DXImageTransform.Microsoft.Alpha(opacity=0);
+  position: absolute;
+  right: 0;
+  top: 0;
+  margin: 0;
+  font-size: 100px;
+  cursor: pointer;
+}
+
+.inputreference {
+  display: inline-block;
+  overflow: hidden;
+  position: relative;
+  padding: 1em;
+  border: 1px solid #ff7f7f;
+  background: #ff7f7f;
+  color:#fff;
+  width: 200px;
+  height: 50px;
+  left: 45%;
+  vertical-align: middle;
+}
+
+.inputreference input[type="file"] {
+  opacity: 0;
+  filter: progid:DXImageTransform.Microsoft.Alpha(opacity=0);
+  position: absolute;
+  right: 0;
+  top: 0;
+  margin: 0;
+  font-size: 100px;
+  cursor: pointer;
+}
+
+.inputbutton {
+  display: inline-block;
+  overflow: hidden;
+  position: relative;
+  padding: 1em;
+  border: 1px solid #ff7f7f;
+  background: #ff7f7f;
+  color:#fff;
+  width: 200px;
+  height: 50px;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+.colorizebutton {
+  overflow: hidden;
+  border: 1px solid #ff7f7f;
+  background: #ff7f7f;
+  color:#fff;
+}
+
+.colorizebutton:hover {
+  background: #ffd1d1;
+  color: #FFF;
+}
+
+.imagetable {
+  display: flex;
+  position: absolute;
+  top: 30%;
+  left: 5%;
+}
+
+.resulttable {
+  display: flex;
+  position: absolute;
+  top: 30%;
+  left: 5%;
+}
+
+.ref_result {
+  margin-left: 10px;
+}
+
+.circle-palette {
+  width: 120px;
+  height: 500px;
+  background-color: white;
+}
+
+.palette {
+  width: 20px;
+  height: 20px;
+  border: none;
+  outline: none;
+  background: transparent;
+}
+
+.allclear {
+  width: 70px;
+  height: 70px;
+  border: none;
+  outline: none;
+  background: transparent;
+  position: relative;
+  left: 25%;
+  color: whitesmoke;
+}
+
+.accurate {
+  width: 55px;
+  height: 35px;
+  border: none;
+  outline: none;
+  background: transparent;
+  position: relative;
+  color: whitesmoke;
+}
+
+.rough {
+  width: 55px;
+  height: 35px;
+  border: none;
+  outline: none;
+  background: transparent;
+  position: relative;
+  color: whitesmoke;
+}
+
+.btn_flat {
+  position: relative;
+  top: 40%;
+  display: inline-block;
+  font-weight: bold;
+  padding: 0.25em 0.5em;
+  text-decoration: none;
+  color: #FFF;
+  background: #ff7f7f;
+  transition: .4s;
+  margin: 20px;
+  height: 50px;
+}
+
+.btn_reference {
+  position: relative;
+  top: 90%;
+  display: inline-block;
+  font-weight: bold;
+  padding: 0.25em 0.5em;
+  text-decoration: none;
+  color: #FFF;
+  background: #ff7f7f;
+  transition: .4s;
+  margin: 20px;
+  height: 50px;
+}
+
+.btn_scribble {
+  position: relative;
+  top: 90%;
+  display: inline-block;
+  font-weight: bold;
+  padding: 0.25em 0.5em;
+  text-decoration: none;
+  color: #FFF;
+  background: #ff7f7f;
+  transition: .4s;
+  margin: 20px;
+  height: 50px;
+}
+
+.btn_flat:hover {
+  background: #ff7f1f;
+}
+
+.btn_reference:hover {
+  background: #ff7f1f;
+}
+
+.btn_scribble:hover {
+  background: #ff7f1f;
+}
