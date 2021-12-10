@@ -14,6 +14,8 @@ function uploadFile(event) {
 			body: JSON.stringify(data),
 		};
 
+		console.log(param);
+
 		fetch('/reference/upload', param)
 				.then((res) => {
 					res.json().then(function(json) {
