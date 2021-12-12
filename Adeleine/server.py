@@ -1,10 +1,12 @@
 import io
+import argparse
 import time
 import base64
 import numpy as np
 import cv2 as cv
 
 from PIL import Image
+from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from reference.inference import ReferenceInferer
 from atari.inference import AtariInferer
@@ -12,7 +14,7 @@ from flatten.inference import FlatInferer
 from point.inference import PointInferer
 
 
-def main(*args, **kwargs):
+def main(args):
     app = Flask(__name__,
                 static_url_path="/static",
                 static_folder="./static")
@@ -22,9 +24,18 @@ def main(*args, **kwargs):
     #flat_infer = FlatInferer("./flatten/flat_158001.pt")
     #point_infer = PointInferer("./point/generator_570001.pt")
 
-    title = "Adeleine"
-    ref_base = 384
-    scrib_base = 512
+    if args.ref is not None:
+        ref_infer = ReferenceInferer(str(args.ref))
+    if args.scribble is not None:
+        atari_infer = AtariInferer(str(args.atari))
+    if args.flat is not None:
+        flat_infer = FlatInferer(str(args.flat))
+    if args.point is not None:
+        point_infer = PointInferer(str(args.point))
+
+    title = args.title
+    ref_base = args.ref_base
+    scrib_base = args.scrib_base
 
     def resize(img: np.array, limit: int) -> (np.array, int, int):
         h, w = img.shape[0], img.shape[1]
@@ -193,4 +204,13 @@ def main(*args, **kwargs):
     app.run(host="0.0.0.0", port=34848)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Adeleine")
+    parser.add_argument("--ref", type=Path, help="pretrained file for reference")
+    parser.add_argument("--scribble", type=Path, help="pretrained file for scribble")
+    parser.add_argument("--flat", type=Path, help="pretrained file for flat")
+    parser.add_argument("--point", type=Path, help="pretrained file for point")
+    parser.add_argument("--title", type=str, default="Adeleine", help="title")
+    parser.add_argument("--ref_base", type=int, default=384, help="first height for reference image")
+    parser.add_argument("--scrib_base", type=int, default=512, help="first height for point")
+    args = parser.parse_args()
+    main(args)
