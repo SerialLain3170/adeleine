@@ -19,11 +19,6 @@ def main(args):
                 static_url_path="/static",
                 static_folder="./static")
 
-    #ref_infer = ReferenceInferer("./reference/generator_208001.pt")
-    #atari_infer = AtariInferer("./atari/model_136001.pt")
-    #flat_infer = FlatInferer("./flatten/flat_158001.pt")
-    #point_infer = PointInferer("./point/generator_570001.pt")
-
     if args.ref is not None:
         ref_infer = ReferenceInferer(str(args.ref))
     if args.scribble is not None:
