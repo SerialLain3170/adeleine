@@ -87,6 +87,10 @@ I also consider taking the hint, named reference, as input of neural network. At
 
 - A simple GUI application, named Adeleine, can be used!
 
+## LICENSE
+I set MIT License on only Adeleine.
+The license is not effective on other implementations.
+
 ## References
 - [XDoG: An eXtended difference-of-Gaussians compendium including advanced image stylization](https://users.cs.northwestern.edu/~sco590/winnemoeller-cag2012.pdf)
 - [sketchKeras](https://github.com/lllyasviel/sketchKeras)
