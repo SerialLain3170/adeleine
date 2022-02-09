@@ -5,6 +5,7 @@ import datetime
 
 from pathlib import Path
 from torch.autograd import Variable
+from zmq import device
 
 
 def session(session_name):
@@ -26,80 +27,54 @@ def session(session_name):
     return outdir_path, modeldir_path
 
 
-# The implementation of Guided Filtering is from
-# https://github.com/wuhuikai/DeepGuidedFilter/tree/master/GuidedFilteringLayer/GuidedFilter_PyTorch/guided_filter_pytorch
-def diff_x(input, r):
-    assert input.dim() == 4
+class MeanFilter(nn.Module):
+    def __init__(self, radius):
+        super(MeanFilter, self).__init__()
 
-    left   = input[:, :,         r:2 * r + 1]
-    middle = input[:, :, 2 * r + 1:         ] - input[:, :,           :-2 * r - 1]
-    right  = input[:, :,        -1:         ] - input[:, :, -2 * r - 1:    -r - 1]
+        self.radius = radius
 
-    output = torch.cat([left, middle, right], dim=2)
+    @staticmethod
+    def xdiff(h, radius):
+        l = h[:, :, radius: 2*radius+1]
+        m = h[:, :, 2*radius+1:] - h[:, :, :-2*radius-1]
+        r = h[:, :, -1:] - h[:, :, -2*radius-1: -radius-1]
 
-    return output
+        return torch.cat([l, m, r], dim=2)
 
+    @staticmethod
+    def ydiff(h, radius):
+        l = h[:, :, :, radius: 2*radius+1]
+        m = h[:, :, :, 2*radius+1:] - h[:, :, :, :-2*radius-1]
+        r = h[:, :, :, -1:] - h[:, :, :, -2*radius-1: -radius-1]
 
-def diff_y(input, r):
-    assert input.dim() == 4
-
-    left   = input[:, :, :,         r:2 * r + 1]
-    middle = input[:, :, :, 2 * r + 1:         ] - input[:, :, :,           :-2 * r - 1]
-    right  = input[:, :, :,        -1:         ] - input[:, :, :, -2 * r - 1:    -r - 1]
-
-    output = torch.cat([left, middle, right], dim=3)
-
-    return output
-
-
-class BoxFilter(nn.Module):
-    def __init__(self, r):
-        super(BoxFilter, self).__init__()
-
-        self.r = r
+        return torch.cat([l, m, r], dim=3)
 
     def forward(self, x):
-        assert x.dim() == 4
-
-        return diff_y(diff_x(x.cumsum(dim=2), self.r).cumsum(dim=3), self.r)
+        return self.ydiff(self.xdiff(x.cumsum(dim=2), self.radius).cumsum(dim=3), self.radius)
 
 
-class GuidedFilter(nn.Module):
-    def __init__(self, r, eps=1e-8):
-        super(GuidedFilter, self).__init__()
+class E2EGuidedFilter(nn.Module):
+    def __init__(self, radius, eps):
+        super(E2EGuidedFilter, self).__init__()
 
-        self.r = r
+        self.radius = radius
         self.eps = eps
-        self.boxfilter = BoxFilter(r)
+        self.mean_filter = MeanFilter(radius)
 
     def forward(self, x, y):
-        n_x, c_x, h_x, w_x = x.size()
-        n_y, c_y, h_y, w_y = y.size()
+        bx, cx, hx, wx = x.size()
 
-        assert n_x == n_y
-        assert c_x == 1 or c_x == c_y
-        assert h_x == h_y and w_x == w_y
-        assert h_x > 2 * self.r + 1 and w_x > 2 * self.r + 1
+        mask = torch.ones((1, 1, hx, wx), device=x.device, dtype=x.dtype)
+        nump = self.mean_filter(mask)
 
-        # N
-        N = self.boxfilter(Variable(x.data.new().resize_((1, 1, h_x, w_x)).fill_(1.0)))
+        x_mean = self.mean_filter(x) / nump
+        y_mean = self.mean_filter(y) / nump
+        xy_cov = self.mean_filter(x * y) / nump - (x_mean * y_mean)
+        x_var = self.mean_filter(x * x) / nump - (x_mean * x_mean)
 
-        # mean_x
-        mean_x = self.boxfilter(x) / N
-        # mean_y
-        mean_y = self.boxfilter(y) / N
-        # cov_xy
-        cov_xy = self.boxfilter(x * y) / N - mean_x * mean_y
-        # var_x
-        var_x = self.boxfilter(x * x) / N - mean_x * mean_x
+        a = xy_cov / (x_var + self.eps)
+        a_mean = self.mean_filter(a) / nump
+        b_mean = self.mean_filter(y_mean - (a * x_mean)) / nump
 
-        # A
-        A = cov_xy / (var_x + self.eps)
-        # b
-        b = mean_y - A * mean_x
+        return a_mean * x + b_mean
 
-        # mean_A; mean_b
-        mean_A = self.boxfilter(A) / N
-        mean_b = self.boxfilter(b) / N
-
-        return mean_A * x + mean_b

@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 from .model import Generator
-from .utils import GuidedFilter
+from .utils import E2EGuidedFilter
 
 
 class PointInferer:
@@ -16,7 +16,7 @@ class PointInferer:
         self.mean = np.array([181.9935, 169.014, 166.2345]).astype(np.float32)
         self.std = np.array([75.735, 76.9335, 75.9645]).astype(np.float32)
 
-        self.out_filter = GuidedFilter(r=1, eps=1e-2)
+        self.out_filter = E2EGuidedFilter(radius=1, eps=1e-2)
         self.out_filter.cuda()
 
     @staticmethod

@@ -544,34 +544,7 @@ class AtariEncoder(nn.Module):
 
         self.encoder_type = encoder_type
 
-        if encoder_type == "i2v":
-            model = caffemodel2pytorch.Net(
-                prototxt='./illustration2vec_PyTorch/illustration2vec/illust2vec_tag.prototxt',
-                weights='./illustration2vec_PyTorch/illustration2vec/illust2vec_tag_ver200.caffemodel',
-                caffe_proto='https://raw.githubusercontent.com/BVLC/caffe/master/src/caffe/proto/caffe.proto'
-            )
-
-            for param in model.parameters():
-                param.requires_grad = False
-
-            del model.relu5_2
-            del model.pool5
-            del model.conv6_1
-            del model.relu6_1
-            del model.conv6_2
-            del model.relu6_2
-            del model.conv6_3
-            del model.relu6_3
-            del model.conv6_4
-            del model.pool6
-
-            self.i2v = model
-
-            self.enc = nn.Sequential(
-                CBR(mid_ch, out_ch, 1, 1, 0, bias=False),
-                CBR(out_ch, out_ch, 3, 1, 1, activ="lrelu")
-            )
-        elif encoder_type == "vgg":
+        if encoder_type == "vgg":
             model = Vgg19(requires_grad=False)
             self.enc = nn.Sequential(
                 model,
@@ -588,10 +561,6 @@ class AtariEncoder(nn.Module):
             )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        #x = x.repeat(1, 3, 1, 1)
-        if self.encoder_type == "i2v":
-            x = self.i2v(x)["conv5_2"]
-
         return self.enc(x)
 
 
