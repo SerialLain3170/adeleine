@@ -2,7 +2,8 @@
 
 ## Caution!
 
-- You can upload only `.png` files
+- You can upload only `.png` files.
+- The point-based model can accept images that have limited shapes, which are two to the Nth power (ex: 256, 512, 1024, etc).
 
 ## Summary
 ![](./data/result1.png)
@@ -17,7 +18,7 @@
 ## Getting Started
 
 ### 0. Download pre-trained file
-- Download `print_model.pt` from [the link](https://github.com/SerialLain3170/Colorization/releases/tag/v0.1.0-alpha) and move the file to `Adeleine/ckpts/`
+- Download `point_model.pt` from [the link](https://github.com/SerialLain3170/Colorization/releases/tag/v0.1.0-alpha) and move the file to `Adeleine/ckpts/`
 
 ### 1. Start Adeleine
 - Start application via the command below
