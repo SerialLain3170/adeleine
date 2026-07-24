@@ -1,0 +1,9 @@
+# Optional line extraction dependencies
+# SketchKeras extraction
+tensorflow
+
+# ControlNet/Annotators lineart_anime extraction
+controlnet-aux
+einops
+scikit-image
+scipy

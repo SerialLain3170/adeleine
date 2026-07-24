@@ -1,0 +1,11 @@
+numpy
+opencv-python
+torch
+diffusers
+accelerate
+peft
+transformers
+safetensors
+tqdm
+requests
+pyarrow

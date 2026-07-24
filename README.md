@@ -1,5 +1,10 @@
 # adeleine
 
+![Adeleine v2 condition showcase](./Data/readme_showcase_step080000_condition_rows.png)
+
+## Adeleine v2 preview
+This repository is being updated toward an all-in-one FLUX.2 Klein LoRA colorizer that uses the same SketchKeras line art with optional text, Atari dot/line hints, or reference images. The preview above uses one held-out line art and changes only the optional condition for each row.
+
 ## Update
 - 03/20/2023: Change repository's name from Colorization to adeleine
 
