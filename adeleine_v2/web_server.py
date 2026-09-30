@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import faulthandler
 import base64
+import hashlib
 import cgi
 import io
 import json
 import os
 import re
 import threading
+from types import SimpleNamespace
 import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -28,7 +30,8 @@ from .atari import AtariHintConfig, AtariHintGenerator
 from .conditions import ColorizationCondition, ColorizationMode, ModalityDropout, TaskSampler
 from .dataset import UnifiedCollator
 from .openniji import OpenNijiParquetColorizationDataset, OpenNijiParquetRecord, deform_reference_rgb
-from .smoke_train_flux_klein import build_condition_images, build_prompt_text, tensor_to_pil
+from .reference_conditioning import ReferenceConditioningBuilder, ReferenceConditioningConfig
+from .smoke_train_flux_klein import WD_PROJECTOR_FILE, build_condition_images, build_prompt_text, build_wd_projector, generate_sample, tensor_to_pil
 
 DEFAULT_LORA_DIR = Path(
     "/data/shasegawa/adeleine/outputs/flux2_klein_openniji_sketchkeras_wip_xdog_fallback_deformed_ref_text_empty_10k/lora"
@@ -236,11 +239,11 @@ async function refreshHealth() {
   catch { $('health').textContent = 'offline'; }
 }
 async function loadPresets() {
-  const data = await (await fetch('/api/presets?limit=12')).json();
+  const data = await (await fetch('/api/presets?limit=36')).json();
   const root = $('presets'); root.innerHTML = '';
   data.presets.forEach((p) => {
     const b = document.createElement('button'); b.className = 'preset';
-    b.innerHTML = `<img src="${p.thumbnail}"><span>#${p.id} ${p.style || 'preset'}</span>`;
+    b.innerHTML = `<img src="${p.thumbnail}"><span>#${p.id} ${p.title || p.style || 'preset'}</span>`;
     b.onclick = () => selectPreset(p.id, b); root.appendChild(b);
   });
   if (data.presets.length) selectPreset(data.presets[0].id, root.querySelector('.preset'));
@@ -321,6 +324,31 @@ class WebArgs:
     cpu_offload: bool
     preload: bool
     max_condition_images: int
+    spatial_hint_mode: str
+    spatial_condition_id_mode: str
+    reference_conditioning: str
+    reference_condition_mode: str
+    reference_tag_cache_root: Optional[Path]
+    reference_mask_root: Optional[Path]
+    reference_mask_fallback: str
+    skytnt_repo: Optional[Path]
+    skytnt_model_id: str
+    skytnt_ckpt: Optional[Path]
+    skytnt_net: str
+    skytnt_image_size: int
+    skytnt_device: str
+    skytnt_fp32: bool
+    skytnt_local_files_only: bool
+    reference_cache_generated_masks: bool
+    wd_tagger_model: Optional[Path]
+    wd_tagger_labels: Optional[Path]
+    wd_tagger_threshold: float
+    reference_tag_max: int
+    append_reference_tags: bool
+    reference_tag_prefix: str
+    reference_wd_max_refs: int
+    reference_wd_tokens_per_ref: int
+    reference_wd_embed_dim: int
     max_sequence_length: int
     default_steps: int
     default_guidance: float
@@ -331,14 +359,36 @@ class AdeleineWebApp:
     def __init__(self, args: WebArgs):
         self.args = args
         self.collator = UnifiedCollator()
+        self.reference_conditioner = ReferenceConditioningBuilder(
+            ReferenceConditioningConfig(
+                mode=args.reference_conditioning,
+                tag_cache_root=args.reference_tag_cache_root,
+                mask_root=args.reference_mask_root,
+                mask_fallback=args.reference_mask_fallback,
+                skytnt_repo=args.skytnt_repo,
+                skytnt_model_id=args.skytnt_model_id,
+                skytnt_ckpt=args.skytnt_ckpt,
+                skytnt_net=args.skytnt_net,
+                skytnt_image_size=args.skytnt_image_size,
+                skytnt_device=args.skytnt_device,
+                skytnt_fp32=args.skytnt_fp32,
+                skytnt_local_files_only=args.skytnt_local_files_only,
+                cache_generated_masks=args.reference_cache_generated_masks,
+                wd_tagger_model=args.wd_tagger_model,
+                wd_tagger_labels=args.wd_tagger_labels,
+                wd_tagger_threshold=args.wd_tagger_threshold,
+                max_tags=args.reference_tag_max,
+            )
+        )
         self._pipe = None
+        self._wd_projector = None
         self._pipe_lock = threading.Lock()
         self._dataset = None
         self._dataset_lock = threading.Lock()
         self._preset_lock = threading.Lock()
         self._preset_cache: dict[int, ColorizationCondition] = {}
         self._target_cache: dict[int, np.ndarray] = {}
-        self._records = self._read_holdout_records(args.holdout_manifest, args.preset_count)
+        self._records = self._read_holdout_records(args.holdout_manifest, 0)
         if args.preload:
             self.load_pipeline()
 
@@ -350,8 +400,32 @@ class AdeleineWebApp:
         return {"ok": True, "model_loaded": self.model_loaded, "lora_dir": str(self.args.lora_dir), "device": self.args.device, "cpu_offload": self.args.cpu_offload, "preset_count": len(self._records), "train_log": str(self.args.train_log), "latest_training": self._tail_training_line()}
 
     def list_presets(self, limit: int) -> list[dict[str, Any]]:
-        limit = min(max(limit, 0), len(self._records))
-        return [{"id": idx, "style": self._records[idx].style, "prompt": self._records[idx].prompt, "thumbnail": f"/api/preset/{idx}/image?kind=target"} for idx in range(limit)]
+        total = len(self._records)
+        limit = min(max(limit, 0), total)
+        if limit == 0:
+            return []
+        if limit >= total:
+            indices = list(range(total))
+        else:
+            indices = []
+            seen = set()
+            for value in np.linspace(0, total - 1, limit):
+                idx = int(round(float(value)))
+                if idx not in seen:
+                    indices.append(idx)
+                    seen.add(idx)
+            cursor = 0
+            while len(indices) < limit and cursor < total:
+                if cursor not in seen:
+                    indices.append(cursor)
+                    seen.add(cursor)
+                cursor += 1
+        presets = []
+        for idx in indices:
+            record = self._records[idx]
+            title = compact_prompt_label(record.prompt, record.style)
+            presets.append({"id": idx, "style": record.style, "prompt": record.prompt, "title": title, "thumbnail": f"/api/preset/{idx}/image?kind=target"})
+        return presets
 
     def preset_meta(self, preset_id: int) -> dict[str, Any]:
         record = self._records[preset_id]
@@ -397,10 +471,27 @@ class AdeleineWebApp:
                 cond = dataset[preset_id]
             finally:
                 np.random.set_state(state)
+            record = self._records[preset_id]
+            cond.lineart = self._sketchkeras_lineart_for_record(record, cond.lineart)
             self._preset_cache[preset_id] = cond
             if cond.target is not None:
                 self._target_cache[preset_id] = cond.target
             return cond
+
+    def _sketchkeras_lineart_for_record(self, record: OpenNijiParquetRecord, fallback: np.ndarray) -> np.ndarray:
+        if self.args.sketch_root is None:
+            return fallback
+        digest = hashlib.sha256(record.url.encode("utf-8")).hexdigest()
+        path = self.args.sketch_root / f"{digest}.png"
+        line_bgr = cv.imread(str(path), cv.IMREAD_COLOR)
+        if line_bgr is None:
+            return fallback
+        line_bgr = cv.resize(line_bgr, (self.args.image_size, self.args.image_size), interpolation=cv.INTER_AREA)
+        gray = cv.cvtColor(line_bgr, cv.COLOR_BGR2GRAY)
+        if float(np.mean(gray)) < 127.0:
+            gray = 255 - gray
+        rgb = cv.cvtColor(gray, cv.COLOR_GRAY2RGB)
+        return rgb.astype(np.uint8)
 
     def colorize(self, form: dict[str, Any], files: dict[str, FormImage]) -> dict[str, Any]:
         start = time.time()
@@ -448,7 +539,24 @@ class AdeleineWebApp:
         text = prompt if include_text else ""
         if include_text and not text and preset is not None:
             text = preset.text
-        cond = ColorizationCondition(lineart=lineart, target=preset.target.copy() if preset is not None and preset.target is not None else None, atari_rgb=atari_rgb, atari_mask=atari_mask, references=[reference] if reference is not None else [], text=text, mode=mode, metadata={"source": "web", "preset_id": preset_id})
+        references = [reference] if reference is not None else []
+        ref_cond = self.reference_conditioner.build(references)
+        cond = ColorizationCondition(
+            lineart=lineart,
+            target=preset.target.copy() if preset is not None and preset.target is not None else None,
+            atari_rgb=atari_rgb,
+            atari_mask=atari_mask,
+            references=references,
+            reference_foregrounds=ref_cond.foregrounds,
+            reference_backgrounds=ref_cond.backgrounds,
+            reference_masks=ref_cond.masks,
+            reference_tags=ref_cond.tags,
+            reference_wd_indices=ref_cond.wd_indices,
+            reference_wd_scores=ref_cond.wd_scores,
+            text=text,
+            mode=mode,
+            metadata={"source": "web", "preset_id": preset_id, "reference_tags": ref_cond.tags},
+        )
         generated, prompt_text, labels = self.run_generation(cond, seed=seed, steps=steps, guidance=guidance)
         elapsed = time.time() - start
         return {"generated": image_to_data_url(generated), "prompt": prompt_text, "condition_labels": labels, "summary": f"Generated in {elapsed:.1f}s with {', '.join(labels)}.", "previews": {"lineart": image_to_data_url(Image.fromarray(lineart)), "atari": image_to_data_url(Image.fromarray(atari_rgb)) if atari_rgb is not None else image_to_data_url(blank_image(self.args.image_size)), "mask": image_to_data_url(mask_to_preview(atari_mask)) if atari_mask is not None else image_to_data_url(blank_image(self.args.image_size)), "reference": image_to_data_url(Image.fromarray(reference)) if reference is not None else image_to_data_url(blank_image(self.args.image_size))}}
@@ -457,14 +565,27 @@ class AdeleineWebApp:
         pipe = self.load_pipeline()
         batch = self.collator([cond])
         tensors = batch_to_tensors(batch, device="cpu")
-        condition_images_cpu, labels, _ = build_condition_images(tensors, False, self.args.max_condition_images)
-        prompt_text = build_prompt_text(tensors.text, batch.mode, batch.presence, False)[0]
-        condition_pils = [tensor_to_pil(img) for img in condition_images_cpu]
-        generator_device = self.args.device if self.args.device.startswith("cuda") else "cpu"
-        generator = torch.Generator(device=generator_device).manual_seed(seed)
-        with torch.inference_mode():
-            result = pipe(image=condition_pils, prompt=prompt_text, height=self.args.image_size, width=self.args.image_size, num_inference_steps=steps, guidance_scale=guidance, generator=generator, max_sequence_length=self.args.max_sequence_length).images[0]
-        return result.convert("RGB"), prompt_text, labels
+        condition_images_cpu, labels, _ = build_condition_images(tensors, False, self.args.max_condition_images, self.args.spatial_hint_mode, self.args.reference_condition_mode)
+        prompt_text = build_prompt_text(
+            tensors.text,
+            batch.mode,
+            batch.presence,
+            False,
+            reference_tags=tensors.reference_tags,
+            append_reference_tags=self.args.append_reference_tags,
+            reference_tag_prefix=self.args.reference_tag_prefix,
+        )[0]
+        sample_args = SimpleNamespace(
+            device=self.args.device if self.args.device.startswith("cuda") else "cpu",
+            image_size=self.args.image_size,
+            sample_inference_steps=steps,
+            sample_guidance_scale=guidance,
+            max_sequence_length=self.args.max_sequence_length,
+            spatial_condition_id_mode=self.args.spatial_condition_id_mode,
+            reference_wd_context=self._wd_projector is not None,
+        )
+        result = generate_sample(pipe, tensors, condition_images_cpu, labels, [prompt_text], sample_args, seed, self._wd_projector)
+        return result, prompt_text, labels
 
     def load_pipeline(self):
         if self._pipe is not None:
@@ -484,6 +605,20 @@ class AdeleineWebApp:
                 pipe.to(self.args.device)
             pipe.transformer.eval()
             pipe.set_progress_bar_config(disable=True)
+            if self.args.reference_conditioning in {"split_wd", "split_wd_tags"}:
+                if (self.args.lora_dir / WD_PROJECTOR_FILE).exists():
+                    self._wd_projector = build_wd_projector(
+                        pipe,
+                        self.args.wd_tagger_labels,
+                        self.args.reference_wd_embed_dim,
+                        self.args.reference_wd_max_refs,
+                        self.args.reference_wd_tokens_per_ref,
+                        self.args.device,
+                        next(pipe.transformer.parameters()).dtype,
+                        state_dir=self.args.lora_dir,
+                    ).eval()
+                else:
+                    print(f"warning: {self.args.lora_dir / WD_PROJECTOR_FILE} missing; serving without WD context", flush=True)
             self._pipe = pipe
             return pipe
 
@@ -494,7 +629,34 @@ class AdeleineWebApp:
             if self._dataset is not None:
                 return self._dataset
             line_methods = ("pencil",) if self.args.sketch_root is not None else ("xdog",)
-            dataset = OpenNijiParquetColorizationDataset(repo_id="all", hf_home=self.args.hf_home, parquet_pattern="data/*.parquet", sketch_root=self.args.sketch_root, image_size=self.args.image_size, max_records=1, line_methods=line_methods, dropout=ModalityDropout(TaskSampler(weights={"all": 1.0})), reference_policy="deformed_self")
+            dataset = OpenNijiParquetColorizationDataset(
+                repo_id="all",
+                hf_home=self.args.hf_home,
+                parquet_pattern="data/*.parquet",
+                sketch_root=self.args.sketch_root,
+                image_size=self.args.image_size,
+                max_records=1,
+                line_methods=line_methods,
+                dropout=ModalityDropout(TaskSampler(weights={"all": 1.0})),
+                reference_policy="deformed_self",
+                reference_conditioning=self.args.reference_conditioning,
+                reference_tag_cache_root=self.args.reference_tag_cache_root,
+                reference_mask_root=self.args.reference_mask_root,
+                reference_mask_fallback=self.args.reference_mask_fallback,
+                skytnt_repo=self.args.skytnt_repo,
+                skytnt_model_id=self.args.skytnt_model_id,
+                skytnt_ckpt=self.args.skytnt_ckpt,
+                skytnt_net=self.args.skytnt_net,
+                skytnt_image_size=self.args.skytnt_image_size,
+                skytnt_device=self.args.skytnt_device,
+                skytnt_fp32=self.args.skytnt_fp32,
+                skytnt_local_files_only=self.args.skytnt_local_files_only,
+                reference_cache_generated_masks=self.args.reference_cache_generated_masks,
+                wd_tagger_model=self.args.wd_tagger_model,
+                wd_tagger_labels=self.args.wd_tagger_labels,
+                wd_tagger_threshold=self.args.wd_tagger_threshold,
+                reference_tag_max=self.args.reference_tag_max,
+            )
             dataset.records = self._records
             dataset.groups = dataset._build_groups(self._records)
             dataset.atari = AtariHintGenerator(AtariHintConfig(mode="dot"))
@@ -691,6 +853,18 @@ def decode_data_url_image(value: Any, size: int) -> Optional[np.ndarray]:
     return np.asarray(image, dtype=np.uint8)
 
 
+def compact_prompt_label(prompt: str, style: str = "", max_len: int = 42) -> str:
+    text = re.sub(r"<@!?\d+>", "", prompt or "")
+    text = re.sub(r"-?\s*Image\s*#?\d+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"https?://\S+", "", text)
+    text = re.sub(r"\s+", " ", text).strip(" ,.-")
+    if style and style != "V5-Default":
+        text = f"{style}: {text}" if text else style
+    if not text:
+        text = style or "holdout preset"
+    return text[: max_len - 1].rstrip() + "…" if len(text) > max_len else text
+
+
 def clean_lineart_rgb(rgb: np.ndarray) -> np.ndarray:
     gray = cv.cvtColor(rgb, cv.COLOR_RGB2GRAY)
     if float(np.mean(gray)) < 127.0:
@@ -741,13 +915,85 @@ def parse_args() -> WebArgs:
     parser.add_argument("--cpu_offload", action="store_true")
     parser.add_argument("--preload", action="store_true")
     parser.add_argument("--max_condition_images", type=int, default=4)
+    parser.add_argument("--spatial_hint_mode", choices=["separate", "fused", "fused_masked"], default="separate")
+    parser.add_argument("--spatial_condition_id_mode", choices=["default", "hint_to_output", "line_hint_to_output"], default="default")
+    parser.add_argument("--reference_conditioning", choices=["none", "split", "split_tags", "split_wd", "split_wd_tags"], default="none")
+    parser.add_argument("--reference_condition_mode", choices=["full", "foreground", "background", "split", "split_full"], default="full")
+    parser.add_argument("--reference_tag_cache_root", type=Path)
+    parser.add_argument("--reference_mask_root", type=Path)
+    parser.add_argument("--reference_mask_fallback", choices=["skytnt", "grabcut", "ellipse", "whole", "skip"], default="grabcut")
+    parser.add_argument("--skytnt_repo", type=Path)
+    parser.add_argument("--skytnt_model_id", default="skytnt/anime-seg")
+    parser.add_argument("--skytnt_ckpt", type=Path)
+    parser.add_argument("--skytnt_net", default="isnet_is")
+    parser.add_argument("--skytnt_image_size", type=int, default=1024)
+    parser.add_argument("--skytnt_device", default="cuda:2")
+    parser.add_argument("--skytnt_fp32", action="store_true")
+    parser.add_argument("--skytnt_local_files_only", action="store_true")
+    parser.add_argument("--no_reference_cache_generated_masks", action="store_true")
+    parser.add_argument("--wd_tagger_model", type=Path)
+    parser.add_argument("--wd_tagger_labels", type=Path)
+    parser.add_argument("--wd_tagger_threshold", type=float, default=0.35)
+    parser.add_argument("--reference_tag_max", type=int, default=24)
+    parser.add_argument("--append_reference_tags", action="store_true")
+    parser.add_argument("--reference_tag_prefix", default="reference attributes")
+    parser.add_argument("--reference_wd_max_refs", type=int, default=2, help="Must match the training run")
+    parser.add_argument("--reference_wd_tokens_per_ref", type=int, default=16, help="Must match the training run")
+    parser.add_argument("--reference_wd_embed_dim", type=int, default=768, help="Must match the training run")
     parser.add_argument("--max_sequence_length", type=int, default=128)
     parser.add_argument("--default_steps", type=int, default=12)
     parser.add_argument("--default_guidance", type=float, default=3.0)
     parser.add_argument("--seed", type=int, default=3170)
     ns = parser.parse_args()
+    if ns.reference_conditioning in {"split_tags", "split_wd_tags"}:
+        ns.append_reference_tags = True
     sketch_root = ns.sketch_root if ns.sketch_root and ns.sketch_root.exists() else None
-    return WebArgs(host=ns.host, port=ns.port, model_id=ns.model_id, lora_dir=ns.lora_dir, hf_home=ns.hf_home, holdout_manifest=ns.holdout_manifest, train_log=ns.train_log, sketch_root=sketch_root, image_size=ns.image_size, preset_count=ns.preset_count, device=ns.device, local_files_only=ns.local_files_only, cpu_offload=ns.cpu_offload, preload=ns.preload, max_condition_images=ns.max_condition_images, max_sequence_length=ns.max_sequence_length, default_steps=ns.default_steps, default_guidance=ns.default_guidance, seed=ns.seed)
+    return WebArgs(
+        host=ns.host,
+        port=ns.port,
+        model_id=ns.model_id,
+        lora_dir=ns.lora_dir,
+        hf_home=ns.hf_home,
+        holdout_manifest=ns.holdout_manifest,
+        train_log=ns.train_log,
+        sketch_root=sketch_root,
+        image_size=ns.image_size,
+        preset_count=ns.preset_count,
+        device=ns.device,
+        local_files_only=ns.local_files_only,
+        cpu_offload=ns.cpu_offload,
+        preload=ns.preload,
+        max_condition_images=ns.max_condition_images,
+        spatial_hint_mode=ns.spatial_hint_mode,
+        spatial_condition_id_mode=ns.spatial_condition_id_mode,
+        reference_conditioning=ns.reference_conditioning,
+        reference_condition_mode=ns.reference_condition_mode,
+        reference_tag_cache_root=ns.reference_tag_cache_root,
+        reference_mask_root=ns.reference_mask_root,
+        reference_mask_fallback=ns.reference_mask_fallback,
+        skytnt_repo=ns.skytnt_repo,
+        skytnt_model_id=ns.skytnt_model_id,
+        skytnt_ckpt=ns.skytnt_ckpt,
+        skytnt_net=ns.skytnt_net,
+        skytnt_image_size=ns.skytnt_image_size,
+        skytnt_device=ns.skytnt_device,
+        skytnt_fp32=ns.skytnt_fp32,
+        skytnt_local_files_only=ns.skytnt_local_files_only,
+        reference_cache_generated_masks=not ns.no_reference_cache_generated_masks,
+        wd_tagger_model=ns.wd_tagger_model,
+        wd_tagger_labels=ns.wd_tagger_labels,
+        wd_tagger_threshold=ns.wd_tagger_threshold,
+        reference_tag_max=ns.reference_tag_max,
+        append_reference_tags=ns.append_reference_tags,
+        reference_tag_prefix=ns.reference_tag_prefix,
+        reference_wd_max_refs=ns.reference_wd_max_refs,
+        reference_wd_tokens_per_ref=ns.reference_wd_tokens_per_ref,
+        reference_wd_embed_dim=ns.reference_wd_embed_dim,
+        max_sequence_length=ns.max_sequence_length,
+        default_steps=ns.default_steps,
+        default_guidance=ns.default_guidance,
+        seed=ns.seed,
+    )
 
 
 def main() -> None:

@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--guidance_scale", type=float, default=3.0)
     parser.add_argument("--max_sequence_length", type=int, default=128)
     parser.add_argument("--max_condition_images", type=int, default=4)
+    parser.add_argument("--spatial_hint_mode", choices=["separate", "fused", "fused_masked"], default="separate")
+    parser.add_argument("--spatial_condition_id_mode", choices=["default", "hint_to_output", "line_hint_to_output"], default="default")
+    parser.add_argument("--output_basename", default="readme_showcase_condition_rows")
+    parser.add_argument("--text_count", type=int, default=2)
+    parser.add_argument("--hide_intro_row", action="store_true", help="Do not include the target/fixed-line-art intro row")
+    parser.add_argument("--hide_line_only", action="store_true", help="Do not include the line-only baseline row")
     parser.add_argument("--seed", type=int, default=883170)
     parser.add_argument("--device", default="cuda:2")
     parser.add_argument("--local_files_only", action="store_true")
@@ -101,7 +107,7 @@ def save_image(path: Path, image: Image.Image | np.ndarray) -> None:
         image.save(path)
 
 
-def make_rows_sheet(base: ColorizationCondition, rows: list[dict], output: Path) -> None:
+def make_rows_sheet(base: ColorizationCondition, rows: list[dict], output: Path, include_intro_row: bool = True) -> None:
     cell = 300
     label_h = 36
     row_gap = 20
@@ -111,7 +117,8 @@ def make_rows_sheet(base: ColorizationCondition, rows: list[dict], output: Path)
     row_h = label_h + cell + row_gap
     cols = 3
     width = margin * 2 + cols * cell + (cols - 1) * gap
-    height = header_h + margin + (len(rows) + 1) * row_h
+    intro_rows = 1 if include_intro_row else 0
+    height = header_h + margin + (len(rows) + intro_rows) * row_h
     sheet = Image.new("RGB", (width, height), (252, 250, 246))
     draw = ImageDraw.Draw(sheet)
     font = ImageFont.load_default()
@@ -131,10 +138,11 @@ def make_rows_sheet(base: ColorizationCondition, rows: list[dict], output: Path)
         sheet.paste(image.resize((cell, cell), Image.Resampling.LANCZOS), (x, y + label_h))
 
     lineart = Image.fromarray(base.lineart)
-    paste_cell(Image.fromarray(base.target), 0, 0, "holdout target", (255, 111, 97))
-    paste_cell(lineart, 1, 0, "fixed SketchKeras line art", (40, 40, 46))
-    paste_cell(lineart, 2, 0, "line art reused below", (40, 40, 46))
-    for idx, row in enumerate(rows, start=1):
+    if include_intro_row:
+        paste_cell(Image.fromarray(base.target), 0, 0, "holdout target", (255, 111, 97))
+        paste_cell(lineart, 1, 0, "fixed SketchKeras line art", (40, 40, 46))
+        paste_cell(lineart, 2, 0, "line art reused below", (40, 40, 46))
+    for idx, row in enumerate(rows, start=intro_rows):
         accent = row.get("accent", (145, 106, 255))
         paste_cell(lineart, 0, idx, "same line art", (40, 40, 46))
         paste_cell(row["condition_image"], 1, idx, row["condition_title"], accent)
@@ -161,22 +169,29 @@ def main() -> None:
     dot_rgb, dot_mask = AtariHintGenerator(
         AtariHintConfig(mode="dot", dot_min_hints=80, dot_max_hints=90, dot_max_patch_size=16, dot_uniform=True)
     )(base.target, base.lineart)
+    np.random.seed(args.seed + 15)
+    sparse_dot_rgb, sparse_dot_mask = AtariHintGenerator(
+        AtariHintConfig(mode="dot", dot_min_hints=18, dot_max_hints=24, dot_max_patch_size=36, dot_uniform=True)
+    )(base.target, base.lineart)
     np.random.seed(args.seed + 20)
     line_rgb, line_mask = AtariHintGenerator(
         AtariHintConfig(mode="line", line_min_hints=16, line_max_hints=24, line_min_length=28, line_max_length=80)
     )(base.target, base.lineart)
-    rows: list[dict] = [
-        {
-            "name": "line_only",
-            "condition": color_condition(base, name="line_only"),
-            "condition_image": blank_condition(args.image_size),
-            "condition_title": "no optional input",
-            "result_title": "line-only result",
-            "accent": (72, 78, 255),
-        }
-    ]
-    for i, prompt in enumerate(text_prompts[:2], start=1):
-        accent = (255, 111, 97) if i == 1 else (255, 90, 160)
+    rows: list[dict] = []
+    if not args.hide_line_only:
+        rows.append(
+            {
+                "name": "line_only",
+                "condition": color_condition(base, name="line_only"),
+                "condition_image": blank_condition(args.image_size),
+                "condition_title": "no optional input",
+                "result_title": "line-only result",
+                "accent": (72, 78, 255),
+            }
+        )
+    text_accents = [(255, 111, 97), (255, 90, 160), (111, 120, 255), (91, 192, 190)]
+    for i, prompt in enumerate(text_prompts[: args.text_count], start=1):
+        accent = text_accents[(i - 1) % len(text_accents)]
         rows.append(
             {
                 "name": f"text_{i}",
@@ -198,6 +213,14 @@ def main() -> None:
                 "accent": (255, 177, 66),
             },
             {
+                "name": "large_sparse_dot_atari",
+                "condition": color_condition(base, atari_rgb=sparse_dot_rgb, atari_mask=sparse_dot_mask, name="large_sparse_dot_atari"),
+                "condition_image": Image.fromarray(sparse_dot_rgb),
+                "condition_title": "large sparse dot Atari",
+                "result_title": "large sparse dot result",
+                "accent": (255, 132, 75),
+            },
+            {
                 "name": "line_atari",
                 "condition": color_condition(base, atari_rgb=line_rgb, atari_mask=line_mask, name="line_atari"),
                 "condition_image": Image.fromarray(line_rgb),
@@ -207,7 +230,7 @@ def main() -> None:
             },
         ]
     )
-    for ref_index, ref_item in zip(ref_indices[:2], ref_items[:2]):
+    for ref_index, ref_item in zip(ref_indices, ref_items):
         rows.append(
             {
                 "name": f"reference_{ref_index}",
@@ -221,6 +244,7 @@ def main() -> None:
     save_image(args.output_dir / "target.png", base.target)
     save_image(args.output_dir / "lineart_sketchkeras.png", base.lineart)
     save_image(args.output_dir / "dot_atari.png", dot_rgb)
+    save_image(args.output_dir / "large_sparse_dot_atari.png", sparse_dot_rgb)
     save_image(args.output_dir / "line_atari.png", line_rgb)
     for ref_index, ref_item in zip(ref_indices, ref_items):
         save_image(args.output_dir / f"reference_{ref_index}.png", ref_item.target)
@@ -231,7 +255,12 @@ def main() -> None:
         "ref_samples": ref_indices,
         "lora_dir": str(args.lora_dir),
         "seed": args.seed,
+        "spatial_hint_mode": args.spatial_hint_mode,
+        "spatial_condition_id_mode": args.spatial_condition_id_mode,
         "text_prompts": text_prompts,
+        "text_count": args.text_count,
+        "hide_intro_row": args.hide_intro_row,
+        "hide_line_only": args.hide_line_only,
         "rows": [],
     }
     for i, row in enumerate(rows):
@@ -241,9 +270,9 @@ def main() -> None:
         result.save(out)
         metadata["rows"].append({"name": row["name"], "condition_labels": labels, "prompt": prompt_text, "path": str(out)})
 
-    sheet = args.output_dir / "readme_showcase_step080000_condition_rows.png"
-    make_rows_sheet(base, rows, sheet)
-    meta_path = args.output_dir / "readme_showcase_step080000_condition_rows.json"
+    sheet = args.output_dir / f"{args.output_basename}.png"
+    make_rows_sheet(base, rows, sheet, include_intro_row=not args.hide_intro_row)
+    meta_path = args.output_dir / f"{args.output_basename}.json"
     meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(sheet)
     print(meta_path)

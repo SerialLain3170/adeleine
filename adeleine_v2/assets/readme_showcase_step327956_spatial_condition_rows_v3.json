@@ -1,0 +1,103 @@
+{
+  "sample": 33,
+  "ref_samples": [
+    1,
+    25,
+    57
+  ],
+  "lora_dir": "/data/shasegawa/adeleine/outputs/flux2_klein_openniji_spatial_hint_from_base_holdout1k_512_ddp2/checkpoints/step_327956",
+  "seed": 984170,
+  "spatial_hint_mode": "fused_masked",
+  "spatial_condition_id_mode": "hint_to_output",
+  "text_prompts": [
+    "pastel anime girl portrait, glossy blue eyes, soft pink hair, white frilled dress, blue lace ribbon, flower background, clean cel shading, vibrant polished anime illustration",
+    "gothic lolita anime girl, short silver hair, sapphire eyes, black and purple frilled dress, neon flower background, high contrast, crisp studio anime coloring",
+    "sunlit summer anime heroine, aqua twin tails, amber eyes, white sailor blouse, lemon yellow cardigan, hydrangea garden, airy watercolor anime finish"
+  ],
+  "text_count": 3,
+  "hide_intro_row": true,
+  "hide_line_only": true,
+  "rows": [
+    {
+      "name": "text_1",
+      "condition_labels": [
+        "line"
+      ],
+      "prompt": "pastel anime girl portrait, glossy blue eyes, soft pink hair, white frilled dress, blue lace ribbon, flower background, clean cel shading, vibrant polished anime illustration mode: render; conditions: lineart, text",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v3/generated_00_text_1.png"
+    },
+    {
+      "name": "text_2",
+      "condition_labels": [
+        "line"
+      ],
+      "prompt": "gothic lolita anime girl, short silver hair, sapphire eyes, black and purple frilled dress, neon flower background, high contrast, crisp studio anime coloring mode: render; conditions: lineart, text",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v3/generated_01_text_2.png"
+    },
+    {
+      "name": "text_3",
+      "condition_labels": [
+        "line"
+      ],
+      "prompt": "sunlit summer anime heroine, aqua twin tails, amber eyes, white sailor blouse, lemon yellow cardigan, hydrangea garden, airy watercolor anime finish mode: render; conditions: lineart, text",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v3/generated_02_text_3.png"
+    },
+    {
+      "name": "dot_atari",
+      "condition_labels": [
+        "line",
+        "spatial_atari",
+        "mask"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v3/generated_03_dot_atari.png"
+    },
+    {
+      "name": "large_sparse_dot_atari",
+      "condition_labels": [
+        "line",
+        "spatial_atari",
+        "mask"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v3/generated_04_large_sparse_dot_atari.png"
+    },
+    {
+      "name": "line_atari",
+      "condition_labels": [
+        "line",
+        "spatial_atari",
+        "mask"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v3/generated_05_line_atari.png"
+    },
+    {
+      "name": "reference_1",
+      "condition_labels": [
+        "line",
+        "ref"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v3/generated_06_reference_1.png"
+    },
+    {
+      "name": "reference_25",
+      "condition_labels": [
+        "line",
+        "ref"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v3/generated_07_reference_25.png"
+    },
+    {
+      "name": "reference_57",
+      "condition_labels": [
+        "line",
+        "ref"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v3/generated_08_reference_57.png"
+    }
+  ]
+}

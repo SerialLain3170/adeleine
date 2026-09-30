@@ -11,6 +11,7 @@ from .atari import AtariHintGenerator
 from .conditions import ColorizationBatch, ColorizationCondition, ModalityDropout, stack_presence
 from .lineart import LineArtAugmentor, LineArtPaths, available_methods
 from .reference import ReferenceSelector, grouped_reference_paths
+from .reference_conditioning import ReferenceConditioningBuilder, ReferenceConditioningConfig
 
 
 class UnifiedColorizationDataset(Dataset):
@@ -29,6 +30,25 @@ class UnifiedColorizationDataset(Dataset):
         image_size: int = 512,
         line_methods: Sequence[str] = ("xdog", "pencil", "digital", "lineart_anime", "blend"),
         dropout: Optional[ModalityDropout] = None,
+        reference_conditioning: str = "none",
+        reference_tag_cache_root: Optional[Path] = None,
+        reference_mask_root: Optional[Path] = None,
+        reference_mask_fallback: str = "grabcut",
+        skytnt_repo: Optional[Path] = None,
+        skytnt_model_id: str = "skytnt/anime-seg",
+        skytnt_ckpt: Optional[Path] = None,
+        skytnt_net: str = "isnet_is",
+        skytnt_image_size: int = 1024,
+        skytnt_device: str = "cuda:0",
+        skytnt_fp32: bool = False,
+        skytnt_local_files_only: bool = False,
+        reference_cache_generated_masks: bool = True,
+        wd_tagger_model: Optional[Path] = None,
+        wd_tagger_labels: Optional[Path] = None,
+        wd_tagger_threshold: float = 0.35,
+        wd_tagger_character_threshold: float = 0.85,
+        wd_tagger_max_tokens: int = 32,
+        reference_tag_max: int = 24,
     ):
         self.data_root = data_root
         self.paths = sorted(data_root.glob(f"**/*{extension}"))
@@ -39,6 +59,29 @@ class UnifiedColorizationDataset(Dataset):
         self.lineart = LineArtAugmentor(available_methods(list(line_methods), line_paths), line_paths)
         self.atari = AtariHintGenerator()
         self.references = ReferenceSelector(image_size=image_size)
+        self.reference_conditioner = ReferenceConditioningBuilder(
+            ReferenceConditioningConfig(
+                mode=reference_conditioning,
+                tag_cache_root=reference_tag_cache_root,
+                mask_root=reference_mask_root,
+                mask_fallback=reference_mask_fallback,
+                skytnt_repo=skytnt_repo,
+                skytnt_model_id=skytnt_model_id,
+                skytnt_ckpt=skytnt_ckpt,
+                skytnt_net=skytnt_net,
+                skytnt_image_size=skytnt_image_size,
+                skytnt_device=skytnt_device,
+                skytnt_fp32=skytnt_fp32,
+                skytnt_local_files_only=skytnt_local_files_only,
+                cache_generated_masks=reference_cache_generated_masks,
+                wd_tagger_model=wd_tagger_model,
+                wd_tagger_labels=wd_tagger_labels,
+                wd_tagger_threshold=wd_tagger_threshold,
+                wd_tagger_character_threshold=wd_tagger_character_threshold,
+                wd_tagger_max_tokens=wd_tagger_max_tokens,
+                max_tags=reference_tag_max,
+            )
+        )
         self.dropout = dropout or ModalityDropout()
         self.captions = self._read_captions(caption_file)
 
@@ -63,6 +106,7 @@ class UnifiedColorizationDataset(Dataset):
             paths = grouped_reference_paths(image_path, self.reference_root)
             refs = self.references.from_paths(line_rgb, paths).images
 
+        ref_cond = self.reference_conditioner.build(refs)
         target = self._flat_target(image_path)
         if target is None:
             target = color_rgb
@@ -73,6 +117,12 @@ class UnifiedColorizationDataset(Dataset):
             atari_rgb=atari_rgb,
             atari_mask=atari_mask,
             references=refs,
+            reference_foregrounds=ref_cond.foregrounds,
+            reference_backgrounds=ref_cond.backgrounds,
+            reference_masks=ref_cond.masks,
+            reference_tags=ref_cond.tags,
+            reference_wd_indices=ref_cond.wd_indices,
+            reference_wd_scores=ref_cond.wd_scores,
             text=self.captions.get(image_path.name, ""),
             metadata={"image_path": str(image_path)},
         )
@@ -112,6 +162,12 @@ class UnifiedCollator:
             atari_rgb=self._stack_optional(batch, "atari_rgb"),
             atari_mask=self._stack_optional(batch, "atari_mask"),
             references=[item.references for item in batch],
+            reference_foregrounds=[item.reference_foregrounds for item in batch],
+            reference_backgrounds=[item.reference_backgrounds for item in batch],
+            reference_masks=[item.reference_masks for item in batch],
+            reference_tags=[item.reference_tags for item in batch],
+            reference_wd_indices=[item.reference_wd_indices for item in batch],
+            reference_wd_scores=[item.reference_wd_scores for item in batch],
             text=[item.text for item in batch],
             mode=[item.mode.value for item in batch],
             presence=stack_presence(batch),

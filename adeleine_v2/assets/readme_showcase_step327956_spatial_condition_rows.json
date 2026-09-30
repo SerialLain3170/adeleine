@@ -1,0 +1,79 @@
+{
+  "sample": 33,
+  "ref_samples": [
+    24,
+    1
+  ],
+  "lora_dir": "/data/shasegawa/adeleine/outputs/flux2_klein_openniji_spatial_hint_from_base_holdout1k_512_ddp2/checkpoints/step_327956",
+  "seed": 983170,
+  "spatial_hint_mode": "fused_masked",
+  "spatial_condition_id_mode": "hint_to_output",
+  "text_prompts": [
+    "pastel anime girl portrait, glossy blue eyes, soft pink hair, white frilled dress, blue lace ribbon, flower background, clean cel shading, vibrant polished anime illustration",
+    "gothic lolita anime girl, short silver hair, sapphire eyes, black and purple frilled dress, neon flower background, high contrast, crisp studio anime coloring"
+  ],
+  "rows": [
+    {
+      "name": "line_only",
+      "condition_labels": [
+        "line"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v1/generated_00_line_only.png"
+    },
+    {
+      "name": "text_1",
+      "condition_labels": [
+        "line"
+      ],
+      "prompt": "pastel anime girl portrait, glossy blue eyes, soft pink hair, white frilled dress, blue lace ribbon, flower background, clean cel shading, vibrant polished anime illustration mode: render; conditions: lineart, text",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v1/generated_01_text_1.png"
+    },
+    {
+      "name": "text_2",
+      "condition_labels": [
+        "line"
+      ],
+      "prompt": "gothic lolita anime girl, short silver hair, sapphire eyes, black and purple frilled dress, neon flower background, high contrast, crisp studio anime coloring mode: render; conditions: lineart, text",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v1/generated_02_text_2.png"
+    },
+    {
+      "name": "dot_atari",
+      "condition_labels": [
+        "line",
+        "spatial_atari",
+        "mask"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v1/generated_03_dot_atari.png"
+    },
+    {
+      "name": "line_atari",
+      "condition_labels": [
+        "line",
+        "spatial_atari",
+        "mask"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v1/generated_04_line_atari.png"
+    },
+    {
+      "name": "reference_24",
+      "condition_labels": [
+        "line",
+        "ref"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v1/generated_05_reference_24.png"
+    },
+    {
+      "name": "reference_1",
+      "condition_labels": [
+        "line",
+        "ref"
+      ],
+      "prompt": "",
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step327956_spatial_v1/generated_06_reference_1.png"
+    }
+  ]
+}

@@ -21,7 +21,7 @@ from .openniji import (
     deform_reference_rgb,
     prompt_group_key,
 )
-from .smoke_train_flux_klein import build_condition_images, build_prompt_text, tensor_to_pil
+from .smoke_train_flux_klein import build_condition_images, build_prompt_text, condition_id_policy, tensor_to_pil
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,6 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--guidance_scale", type=float, default=3.0)
     parser.add_argument("--max_sequence_length", type=int, default=128)
     parser.add_argument("--max_condition_images", type=int, default=4)
+    parser.add_argument("--spatial_hint_mode", choices=["separate", "fused", "fused_masked"], default="separate")
+    parser.add_argument("--spatial_condition_id_mode", choices=["default", "hint_to_output", "line_hint_to_output"], default="default")
     parser.add_argument("--seed", type=int, default=803170)
     parser.add_argument("--device", default="cuda:2")
     parser.add_argument("--local_files_only", action="store_true")
@@ -117,11 +119,18 @@ def render_condition(pipe, condition: ColorizationCondition, args: argparse.Name
     collator = UnifiedCollator()
     batch = collator([condition])
     tensors = batch_to_tensors(batch, device="cpu")
-    condition_images_cpu, labels, _ = build_condition_images(tensors, False, args.max_condition_images)
+    condition_images_cpu, labels, _ = build_condition_images(
+        tensors,
+        False,
+        args.max_condition_images,
+        getattr(args, "spatial_hint_mode", "separate"),
+    )
     prompt_text = build_prompt_text(tensors.text, batch.mode, batch.presence, False)
     condition_pils = [tensor_to_pil(img) for img in condition_images_cpu]
     generator = torch.Generator(device=args.device).manual_seed(seed)
-    with torch.inference_mode():
+    with torch.inference_mode(), condition_id_policy(
+        pipe, labels, getattr(args, "spatial_condition_id_mode", "default")
+    ):
         result = pipe(
             image=condition_pils,
             prompt=prompt_text[0],

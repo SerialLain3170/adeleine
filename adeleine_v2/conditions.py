@@ -26,6 +26,12 @@ class ColorizationCondition:
     atari_rgb: Optional[np.ndarray] = None
     atari_mask: Optional[np.ndarray] = None
     references: List[np.ndarray] = field(default_factory=list)
+    reference_foregrounds: List[np.ndarray] = field(default_factory=list)
+    reference_backgrounds: List[np.ndarray] = field(default_factory=list)
+    reference_masks: List[np.ndarray] = field(default_factory=list)
+    reference_tags: List[str] = field(default_factory=list)
+    reference_wd_indices: List[np.ndarray] = field(default_factory=list)
+    reference_wd_scores: List[np.ndarray] = field(default_factory=list)
     text: str = ""
     mode: ColorizationMode = ColorizationMode.RENDER
     metadata: Dict[str, object] = field(default_factory=dict)
@@ -35,6 +41,10 @@ class ColorizationCondition:
             "lineart": True,
             "atari": self.atari_rgb is not None and self.atari_mask is not None,
             "reference": len(self.references) > 0,
+            "reference_foreground": len(self.reference_foregrounds) > 0,
+            "reference_background": len(self.reference_backgrounds) > 0,
+            "reference_tags": len(self.reference_tags) > 0,
+            "reference_wd": len(self.reference_wd_indices) > 0,
             "text": bool(self.text),
             "target": self.target is not None,
             "flat": self.mode == ColorizationMode.FLAT,
@@ -49,6 +59,12 @@ class ColorizationBatch:
     atari_rgb: Optional[np.ndarray]
     atari_mask: Optional[np.ndarray]
     references: List[List[np.ndarray]]
+    reference_foregrounds: List[List[np.ndarray]]
+    reference_backgrounds: List[List[np.ndarray]]
+    reference_masks: List[List[np.ndarray]]
+    reference_tags: List[List[str]]
+    reference_wd_indices: List[List[np.ndarray]]
+    reference_wd_scores: List[List[np.ndarray]]
     text: List[str]
     mode: List[str]
     presence: Dict[str, np.ndarray]
@@ -109,6 +125,12 @@ class ModalityDropout:
             atari_rgb=condition.atari_rgb if keep_atari else None,
             atari_mask=condition.atari_mask if keep_atari else None,
             references=condition.references if keep_reference else [],
+            reference_foregrounds=condition.reference_foregrounds if keep_reference else [],
+            reference_backgrounds=condition.reference_backgrounds if keep_reference else [],
+            reference_masks=condition.reference_masks if keep_reference else [],
+            reference_tags=condition.reference_tags if keep_reference else [],
+            reference_wd_indices=condition.reference_wd_indices if keep_reference else [],
+            reference_wd_scores=condition.reference_wd_scores if keep_reference else [],
             text=condition.text if keep_text else "",
             mode=self.task_sampler.mode_for(task),
             metadata={**condition.metadata, "task": task},

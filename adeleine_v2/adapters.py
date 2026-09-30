@@ -17,6 +17,12 @@ class ConditionTensors:
     atari_rgb: Optional[torch.Tensor]
     atari_mask: Optional[torch.Tensor]
     reference_images: List[List[torch.Tensor]]
+    reference_foregrounds: List[List[torch.Tensor]]
+    reference_backgrounds: List[List[torch.Tensor]]
+    reference_masks: List[List[torch.Tensor]]
+    reference_tags: List[List[str]]
+    reference_wd_indices: List[List[torch.Tensor]]
+    reference_wd_scores: List[List[torch.Tensor]]
     presence: Dict[str, torch.Tensor]
     mode_ids: torch.Tensor
     text: List[str]
@@ -42,12 +48,49 @@ def batch_to_tensors(batch: ColorizationBatch, device: torch.device | str = "cpu
     target = image_array_to_tensor(batch.target).to(device) if batch.target is not None else None
     atari_rgb = image_array_to_tensor(batch.atari_rgb).to(device) if batch.atari_rgb is not None else None
     atari_mask = mask_array_to_tensor(batch.atari_mask).to(device) if batch.atari_mask is not None else None
-    references: List[List[torch.Tensor]] = []
-    for refs in batch.references:
-        references.append([image_array_to_tensor(ref[None]).squeeze(0).to(device) for ref in refs])
+    def tensorize_images(items: List[List[np.ndarray]], normalize: bool = True) -> List[List[torch.Tensor]]:
+        out: List[List[torch.Tensor]] = []
+        for images in items:
+            out.append([image_array_to_tensor(image[None], normalize=normalize).squeeze(0).to(device) for image in images])
+        return out
+
+    def tensorize_masks(items: List[List[np.ndarray]]) -> List[List[torch.Tensor]]:
+        out: List[List[torch.Tensor]] = []
+        for masks in items:
+            out.append([mask_array_to_tensor(mask[None]).squeeze(0).to(device) for mask in masks])
+        return out
+
+    references = tensorize_images(batch.references)
+    reference_foregrounds = tensorize_images(batch.reference_foregrounds)
+    reference_backgrounds = tensorize_images(batch.reference_backgrounds)
+    reference_masks = tensorize_masks(batch.reference_masks)
+
+    def tensorize_wd(items: List[List[np.ndarray]], dtype: torch.dtype) -> List[List[torch.Tensor]]:
+        out: List[List[torch.Tensor]] = []
+        for refs in items:
+            out.append([torch.as_tensor(ref, dtype=dtype, device=device) for ref in refs])
+        return out
+
+    reference_wd_indices = tensorize_wd(batch.reference_wd_indices, torch.long)
+    reference_wd_scores = tensorize_wd(batch.reference_wd_scores, torch.float32)
     presence = {key: torch.from_numpy(value.astype(np.float32)).to(device) for key, value in batch.presence.items()}
     mode_ids = torch.tensor([MODE_TO_ID.get(mode, 0) for mode in batch.mode], dtype=torch.long, device=device)
-    return ConditionTensors(lineart, target, atari_rgb, atari_mask, references, presence, mode_ids, batch.text)
+    return ConditionTensors(
+        lineart,
+        target,
+        atari_rgb,
+        atari_mask,
+        references,
+        reference_foregrounds,
+        reference_backgrounds,
+        reference_masks,
+        batch.reference_tags,
+        reference_wd_indices,
+        reference_wd_scores,
+        presence,
+        mode_ids,
+        batch.text,
+    )
 
 
 class SpatialConditionAdapter(nn.Module):

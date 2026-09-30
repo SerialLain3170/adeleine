@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Callable, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 import cv2 as cv
@@ -17,6 +17,7 @@ from .atari import AtariHintGenerator
 from .conditions import ColorizationCondition, ModalityDropout
 from .lineart import LineArtAugmentor, LineArtPaths, available_methods
 from .reference import ReferenceSelector
+from .reference_conditioning import ReferenceConditioningBuilder, ReferenceConditioningConfig, split_reference_layers
 
 
 ReferencePolicy = Literal["self", "deformed_self", "self_deformed", "sibling", "mixed", "none"]
@@ -29,21 +30,71 @@ def resolve_reference_policy(policy: ReferencePolicy) -> ReferencePolicy:
     return policy
 
 
-def deform_reference_rgb(rgb: np.ndarray) -> np.ndarray:
-    h, w = rgb.shape[:2]
-    center = (w * 0.5, h * 0.5)
-    angle = float(np.random.uniform(-12.0, 12.0))
-    scale = float(np.random.uniform(0.86, 1.14))
-    matrix = cv.getRotationMatrix2D(center, angle, scale)
-    matrix[0, 2] += float(np.random.uniform(-0.10, 0.10) * w)
-    matrix[1, 2] += float(np.random.uniform(-0.10, 0.10) * h)
-    out = cv.warpAffine(rgb, matrix, (w, h), flags=cv.INTER_LINEAR, borderMode=cv.BORDER_REFLECT_101)
+# Masks are warped with the same border mode as the RGB (BORDER_REFLECT_101): reflected foreground pulled in
+# from the image border must stay labelled foreground, or it leaks into the background layer.
+def _warp_mask(mask: np.ndarray, matrix: np.ndarray, size: tuple[int, int], perspective: bool = False) -> np.ndarray:
+    mask_arr = np.asarray(mask)
+    if mask_arr.ndim == 3:
+        mask_arr = mask_arr[..., 0]
+    if perspective:
+        out = cv.warpPerspective(mask_arr, matrix, size, flags=cv.INTER_LINEAR, borderMode=cv.BORDER_REFLECT_101)
+    else:
+        out = cv.warpAffine(mask_arr, matrix, size, flags=cv.INTER_LINEAR, borderMode=cv.BORDER_REFLECT_101)
+    return np.clip(out, 0, 255).astype(np.uint8)[..., None]
 
-    jitter = min(h, w) * float(np.random.uniform(0.015, 0.055))
+
+ReferenceDeformStrength = Literal["mild", "strong"]
+ReferenceBackgroundSource = Literal["self", "other"]
+
+# (max rotation deg, scale range, max translation fraction, perspective jitter range, hflip prob, elastic amplitude fraction)
+_DEFORM_PARAMS = {
+    "mild": (12.0, (0.86, 1.14), 0.10, (0.015, 0.055), 0.0, 0.0),
+    "strong": (25.0, (0.75, 1.25), 0.18, (0.03, 0.09), 0.5, 0.04),
+}
+
+
+def _elastic_maps(h: int, w: int, amplitude: float) -> tuple[np.ndarray, np.ndarray]:
+    # Smooth random displacement field: coarse noise upsampled to full resolution.
+    grid = 5
+    dx = cv.resize(np.random.uniform(-1.0, 1.0, (grid, grid)).astype(np.float32), (w, h), interpolation=cv.INTER_CUBIC)
+    dy = cv.resize(np.random.uniform(-1.0, 1.0, (grid, grid)).astype(np.float32), (w, h), interpolation=cv.INTER_CUBIC)
+    xx, yy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    return xx + dx * amplitude * w, yy + dy * amplitude * h
+
+
+def deform_reference_rgb_and_mask(
+    rgb: np.ndarray,
+    mask: Optional[np.ndarray] = None,
+    strength: ReferenceDeformStrength = "mild",
+) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    max_angle, scale_range, max_shift, jitter_range, flip_prob, elastic = _DEFORM_PARAMS[strength]
+    h, w = rgb.shape[:2]
+    if flip_prob > 0.0 and np.random.random() < flip_prob:
+        rgb = np.ascontiguousarray(rgb[:, ::-1])
+        if mask is not None:
+            mask = np.ascontiguousarray(np.asarray(mask)[:, ::-1])
+    center = (w * 0.5, h * 0.5)
+    angle = float(np.random.uniform(-max_angle, max_angle))
+    scale = float(np.random.uniform(*scale_range))
+    matrix = cv.getRotationMatrix2D(center, angle, scale)
+    matrix[0, 2] += float(np.random.uniform(-max_shift, max_shift) * w)
+    matrix[1, 2] += float(np.random.uniform(-max_shift, max_shift) * h)
+    out = cv.warpAffine(rgb, matrix, (w, h), flags=cv.INTER_LINEAR, borderMode=cv.BORDER_REFLECT_101)
+    mask_out = _warp_mask(mask, matrix, (w, h)) if mask is not None else None
+
+    if elastic > 0.0:
+        map_x, map_y = _elastic_maps(h, w, elastic)
+        out = cv.remap(out, map_x, map_y, interpolation=cv.INTER_LINEAR, borderMode=cv.BORDER_REFLECT_101)
+        if mask_out is not None:
+            mask_out = cv.remap(mask_out[..., 0], map_x, map_y, interpolation=cv.INTER_LINEAR, borderMode=cv.BORDER_REFLECT_101)[..., None]
+
+    jitter = min(h, w) * float(np.random.uniform(*jitter_range))
     src = np.float32([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]])
     dst = src + np.random.uniform(-jitter, jitter, size=(4, 2)).astype(np.float32)
     perspective = cv.getPerspectiveTransform(src, dst)
     out = cv.warpPerspective(out, perspective, (w, h), flags=cv.INTER_LINEAR, borderMode=cv.BORDER_REFLECT_101)
+    if mask_out is not None:
+        mask_out = _warp_mask(mask_out, perspective, (w, h), perspective=True)
 
     work = out.astype(np.float32)
     work = (work - 127.5) * float(np.random.uniform(0.88, 1.12)) + 127.5
@@ -54,6 +105,10 @@ def deform_reference_rgb(rgb: np.ndarray) -> np.ndarray:
     if np.random.random() < 0.4:
         sigma = float(np.random.uniform(0.3, 0.8))
         out = cv.GaussianBlur(out, (0, 0), sigmaX=sigma, sigmaY=sigma)
+        if mask_out is not None:
+            mask_out = cv.GaussianBlur(mask_out, (0, 0), sigmaX=sigma, sigmaY=sigma)
+            if mask_out.ndim == 2:
+                mask_out = mask_out[..., None]
 
     if np.random.random() < 0.35:
         factor = float(np.random.uniform(0.65, 0.90))
@@ -61,6 +116,9 @@ def deform_reference_rgb(rgb: np.ndarray) -> np.ndarray:
         small_h = max(16, int(h * factor))
         small = cv.resize(out, (small_w, small_h), interpolation=cv.INTER_AREA)
         out = cv.resize(small, (w, h), interpolation=cv.INTER_LINEAR)
+        if mask_out is not None:
+            small_mask = cv.resize(mask_out[..., 0], (small_w, small_h), interpolation=cv.INTER_AREA)
+            mask_out = cv.resize(small_mask, (w, h), interpolation=cv.INTER_LINEAR)[..., None]
 
     if np.random.random() < 0.25:
         mean_color = tuple(int(x) for x in out.reshape(-1, 3).mean(axis=0))
@@ -71,7 +129,88 @@ def deform_reference_rgb(rgb: np.ndarray) -> np.ndarray:
             y0 = int(np.random.uniform(0, max(1, h - box_h)))
             cv.rectangle(out, (x0, y0), (x0 + box_w, y0 + box_h), mean_color, thickness=-1)
 
-    return out
+    if mask_out is not None:
+        mask_out = np.clip(mask_out, 0, 255).astype(np.uint8)
+    return out, mask_out
+
+
+def deform_reference_rgb(rgb: np.ndarray) -> np.ndarray:
+    return deform_reference_rgb_and_mask(rgb, None)[0]
+
+
+@dataclass
+class ReferenceInputs:
+    """Per-sample reference images plus optional precomputed conditioning, aligned by index."""
+
+    images: List[np.ndarray] = field(default_factory=list)
+    urls: List[str] = field(default_factory=list)
+    policy: str = "none"
+    masks: List[Optional[np.ndarray]] = field(default_factory=list)
+    tags: List[Optional[List[str]]] = field(default_factory=list)
+    wd_indices: List[Optional[List[np.ndarray]]] = field(default_factory=list)
+    wd_scores: List[Optional[List[np.ndarray]]] = field(default_factory=list)
+    backgrounds: List[Optional[np.ndarray]] = field(default_factory=list)
+
+    def build(self, conditioner: ReferenceConditioningBuilder):
+        return conditioner.build(
+            self.images,
+            self.masks,
+            self.tags,
+            self.wd_indices,
+            self.wd_scores,
+            reference_backgrounds=self.backgrounds,
+        )
+
+
+def self_reference_inputs(
+    conditioner: ReferenceConditioningBuilder,
+    source: np.ndarray,
+    url: str,
+    policy: str,
+    resize: Callable[[np.ndarray], np.ndarray],
+    deform_strength: ReferenceDeformStrength = "mild",
+    background_source: ReferenceBackgroundSource = "self",
+    other_rgb: Optional[Callable[[], Optional[np.ndarray]]] = None,
+) -> ReferenceInputs:
+    """Self-derived references for the self / deformed_self / self_deformed policies.
+
+    Only (image, mask) pairs are handed to the builder, which splits foreground and background exactly as
+    it does for user references at inference. The deformed reference therefore never carries a pixel-aligned
+    copy of the target: its background is split from the deformed image, or taken from another record.
+    """
+    mask = conditioner.reference_mask(source) if conditioner.enabled else None
+    tags = conditioner.tag(source, mask) if conditioner.wants_tags else []
+    wd_indices: Optional[List[np.ndarray]] = None
+    wd_scores: Optional[List[np.ndarray]] = None
+    if conditioner.wants_wd_tokens:
+        # Same foreground/background layers as inference; these are what precompute_wd_reference_tokens caches.
+        results = conditioner.wd_results(source, mask)
+        wd_indices, wd_scores = [r.indices for r in results], [r.scores for r in results]
+
+    images: List[np.ndarray] = []
+    masks: List[Optional[np.ndarray]] = []
+    if policy in {"self", "self_deformed"}:
+        images.append(source)
+        masks.append(mask)
+    if policy in {"deformed_self", "self_deformed"}:
+        deformed, deformed_mask = deform_reference_rgb_and_mask(source, mask, deform_strength)
+        deformed = resize(deformed)
+        if deformed_mask is not None:
+            deformed_mask = resize(deformed_mask)
+            if deformed_mask.ndim == 2:
+                deformed_mask = deformed_mask[..., None]
+        images.append(deformed)
+        masks.append(deformed_mask)
+
+    backgrounds: List[Optional[np.ndarray]] = [None] * len(images)
+    if conditioner.enabled and background_source == "other" and other_rgb is not None:
+        other = other_rgb()
+        if other is not None:
+            _, other_bg, _ = split_reference_layers(other, conditioner.reference_mask(other))
+            backgrounds = [other_bg] * len(images)
+
+    n = len(images)
+    return ReferenceInputs(images, [url] * n, policy, masks, [tags] * n, [wd_indices] * n, [wd_scores] * n, backgrounds)
 
 
 @dataclass(frozen=True)
@@ -176,6 +315,27 @@ class OpenNijiColorizationDataset(Dataset):
         line_methods: tuple[str, ...] = ("xdog", "pencil", "digital", "lineart_anime", "blend"),
         dropout: Optional[ModalityDropout] = None,
         reference_policy: ReferencePolicy = DEFAULT_REFERENCE_POLICY,
+        reference_deform_strength: ReferenceDeformStrength = "mild",
+        reference_background_source: ReferenceBackgroundSource = "self",
+        reference_conditioning: str = "none",
+        reference_tag_cache_root: Optional[Path] = None,
+        reference_mask_root: Optional[Path] = None,
+        reference_mask_fallback: str = "grabcut",
+        skytnt_repo: Optional[Path] = None,
+        skytnt_model_id: str = "skytnt/anime-seg",
+        skytnt_ckpt: Optional[Path] = None,
+        skytnt_net: str = "isnet_is",
+        skytnt_image_size: int = 1024,
+        skytnt_device: str = "cuda:0",
+        skytnt_fp32: bool = False,
+        skytnt_local_files_only: bool = False,
+        reference_cache_generated_masks: bool = True,
+        wd_tagger_model: Optional[Path] = None,
+        wd_tagger_labels: Optional[Path] = None,
+        wd_tagger_threshold: float = 0.35,
+        wd_tagger_character_threshold: float = 0.85,
+        wd_tagger_max_tokens: int = 32,
+        reference_tag_max: int = 24,
     ):
         self.jsonl_path = jsonl_path or default_openniji_jsonl(hf_home)
         self.image_cache = OpenNijiImageCache(image_cache)
@@ -188,7 +348,32 @@ class OpenNijiColorizationDataset(Dataset):
         self.lineart = LineArtAugmentor(available_methods(list(line_methods), line_paths), line_paths)
         self.atari = AtariHintGenerator()
         self.references = ReferenceSelector(max_refs=max_refs, refs_per_patch=max(1, max_refs // 4), image_size=image_size)
+        self.reference_conditioner = ReferenceConditioningBuilder(
+            ReferenceConditioningConfig(
+                mode=reference_conditioning,
+                tag_cache_root=reference_tag_cache_root,
+                mask_root=reference_mask_root,
+                mask_fallback=reference_mask_fallback,
+                skytnt_repo=skytnt_repo,
+                skytnt_model_id=skytnt_model_id,
+                skytnt_ckpt=skytnt_ckpt,
+                skytnt_net=skytnt_net,
+                skytnt_image_size=skytnt_image_size,
+                skytnt_device=skytnt_device,
+                skytnt_fp32=skytnt_fp32,
+                skytnt_local_files_only=skytnt_local_files_only,
+                cache_generated_masks=reference_cache_generated_masks,
+                wd_tagger_model=wd_tagger_model,
+                wd_tagger_labels=wd_tagger_labels,
+                wd_tagger_threshold=wd_tagger_threshold,
+                wd_tagger_character_threshold=wd_tagger_character_threshold,
+                wd_tagger_max_tokens=wd_tagger_max_tokens,
+                max_tags=reference_tag_max,
+            )
+        )
         self.dropout = dropout or ModalityDropout()
+        self.reference_deform_strength = reference_deform_strength
+        self.reference_background_source = reference_background_source
         self.groups = self._build_groups(self.records)
 
     def __len__(self) -> int:
@@ -208,36 +393,45 @@ class OpenNijiColorizationDataset(Dataset):
         line_rgb = cv.cvtColor(line_bgr, cv.COLOR_BGR2RGB)
         atari_rgb, atari_mask = self.atari(color_rgb, line_rgb)
 
-        ref_images, ref_urls, ref_policy = self._reference_images(record, line_rgb, color_rgb)
+        refs = self._reference_images(record, line_rgb, color_rgb)
+        ref_cond = refs.build(self.reference_conditioner)
         text = self._caption(record)
         condition = ColorizationCondition(
             lineart=line_rgb,
             target=color_rgb,
             atari_rgb=atari_rgb,
             atari_mask=atari_mask,
-            references=ref_images,
+            references=refs.images,
+            reference_foregrounds=ref_cond.foregrounds,
+            reference_backgrounds=ref_cond.backgrounds,
+            reference_masks=ref_cond.masks,
+            reference_tags=ref_cond.tags,
+            reference_wd_indices=ref_cond.wd_indices,
+            reference_wd_scores=ref_cond.wd_scores,
             text=text,
-            metadata={"url": record.url, "prompt": record.prompt, "style": record.style, "image_path": str(image_path), "reference_urls": ref_urls, "reference_policy": self.reference_policy, "reference_policy_actual": ref_policy},
+            metadata={"url": record.url, "prompt": record.prompt, "style": record.style, "image_path": str(image_path), "reference_urls": refs.urls, "reference_policy": self.reference_policy, "reference_policy_actual": refs.policy, "reference_tags": ref_cond.tags},
         )
         return self.dropout(condition)
 
-    def _reference_images(self, record: OpenNijiRecord, line_rgb: np.ndarray, color_rgb: np.ndarray) -> tuple[List[np.ndarray], List[str], str]:
+    def _reference_images(self, record: OpenNijiRecord, line_rgb: np.ndarray, color_rgb: np.ndarray) -> ReferenceInputs:
         policy = resolve_reference_policy(self.reference_policy)
         if policy == "none":
-            return [], [], policy
-        if policy == "self":
-            return [self._resize_square(color_rgb)], [record.url], policy
-        if policy == "deformed_self":
-            return [self._resize_square(deform_reference_rgb(color_rgb))], [record.url], policy
-        if policy == "self_deformed":
-            return [
+            return ReferenceInputs(policy=policy)
+        if policy in {"self", "deformed_self", "self_deformed"}:
+            return self_reference_inputs(
+                self.reference_conditioner,
                 self._resize_square(color_rgb),
-                self._resize_square(deform_reference_rgb(color_rgb)),
-            ], [record.url, record.url], policy
+                record.url,
+                policy,
+                self._resize_square,
+                self.reference_deform_strength,
+                self.reference_background_source,
+                lambda: self._random_other_rgb(record),
+            )
 
         siblings = [item for item in self.groups.get(record.group_key, []) if item.url != record.url]
         if not siblings:
-            return [], [], policy
+            return ReferenceInputs(policy=policy)
         np.random.shuffle(siblings)
         refs = []
         ref_urls = []
@@ -252,10 +446,23 @@ class OpenNijiColorizationDataset(Dataset):
             except Exception:
                 continue
         pack = self.references.pack(line_rgb, refs)
-        return pack.images, ref_urls[: len(pack.images)], policy
+        return ReferenceInputs(pack.images, ref_urls[: len(pack.images)], policy)
 
     def _resize_square(self, img: np.ndarray) -> np.ndarray:
         return cv.resize(img, (self.image_size, self.image_size), interpolation=cv.INTER_AREA)
+
+    def _random_other_rgb(self, record: OpenNijiRecord, attempts: int = 3) -> Optional[np.ndarray]:
+        for _ in range(attempts):
+            other = self.records[np.random.randint(len(self.records))]
+            if other.url == record.url:
+                continue
+            try:
+                img = cv.imread(str(self.image_cache.get(other, download=self.download)), cv.IMREAD_COLOR)
+            except Exception:
+                continue
+            if img is not None:
+                return cv.cvtColor(self._resize_square(img), cv.COLOR_BGR2RGB)
+        return None
 
     @staticmethod
     def _caption(record: OpenNijiRecord) -> str:
@@ -358,6 +565,27 @@ class OpenNijiParquetColorizationDataset(Dataset):
         line_methods: tuple[str, ...] = ("xdog", "pencil", "digital", "lineart_anime", "blend"),
         dropout: Optional[ModalityDropout] = None,
         reference_policy: ReferencePolicy = DEFAULT_REFERENCE_POLICY,
+        reference_deform_strength: ReferenceDeformStrength = "mild",
+        reference_background_source: ReferenceBackgroundSource = "self",
+        reference_conditioning: str = "none",
+        reference_tag_cache_root: Optional[Path] = None,
+        reference_mask_root: Optional[Path] = None,
+        reference_mask_fallback: str = "grabcut",
+        skytnt_repo: Optional[Path] = None,
+        skytnt_model_id: str = "skytnt/anime-seg",
+        skytnt_ckpt: Optional[Path] = None,
+        skytnt_net: str = "isnet_is",
+        skytnt_image_size: int = 1024,
+        skytnt_device: str = "cuda:0",
+        skytnt_fp32: bool = False,
+        skytnt_local_files_only: bool = False,
+        reference_cache_generated_masks: bool = True,
+        wd_tagger_model: Optional[Path] = None,
+        wd_tagger_labels: Optional[Path] = None,
+        wd_tagger_threshold: float = 0.35,
+        wd_tagger_character_threshold: float = 0.85,
+        wd_tagger_max_tokens: int = 32,
+        reference_tag_max: int = 24,
     ):
         try:
             import pyarrow.parquet as pq
@@ -378,7 +606,32 @@ class OpenNijiParquetColorizationDataset(Dataset):
         self.lineart = LineArtAugmentor(available_methods(list(line_methods), line_paths), line_paths)
         self.atari = AtariHintGenerator()
         self.references = ReferenceSelector(max_refs=max_refs, refs_per_patch=max(1, max_refs // 4), image_size=image_size)
+        self.reference_conditioner = ReferenceConditioningBuilder(
+            ReferenceConditioningConfig(
+                mode=reference_conditioning,
+                tag_cache_root=reference_tag_cache_root,
+                mask_root=reference_mask_root,
+                mask_fallback=reference_mask_fallback,
+                skytnt_repo=skytnt_repo,
+                skytnt_model_id=skytnt_model_id,
+                skytnt_ckpt=skytnt_ckpt,
+                skytnt_net=skytnt_net,
+                skytnt_image_size=skytnt_image_size,
+                skytnt_device=skytnt_device,
+                skytnt_fp32=skytnt_fp32,
+                skytnt_local_files_only=skytnt_local_files_only,
+                cache_generated_masks=reference_cache_generated_masks,
+                wd_tagger_model=wd_tagger_model,
+                wd_tagger_labels=wd_tagger_labels,
+                wd_tagger_threshold=wd_tagger_threshold,
+                wd_tagger_character_threshold=wd_tagger_character_threshold,
+                wd_tagger_max_tokens=wd_tagger_max_tokens,
+                max_tags=reference_tag_max,
+            )
+        )
         self.dropout = dropout or ModalityDropout()
+        self.reference_deform_strength = reference_deform_strength
+        self.reference_background_source = reference_background_source
         self.records = self._build_records(max_records)
         self.groups = self._build_groups(self.records)
 
@@ -409,15 +662,22 @@ class OpenNijiParquetColorizationDataset(Dataset):
         line_rgb = cv.cvtColor(line_bgr, cv.COLOR_BGR2RGB)
         atari_rgb, atari_mask = self.atari(color_rgb, line_rgb)
 
-        ref_images, ref_urls, ref_policy = self._reference_images(record, line_rgb, color_rgb)
+        refs = self._reference_images(record, line_rgb, color_rgb)
+        ref_cond = refs.build(self.reference_conditioner)
         condition = ColorizationCondition(
             lineart=line_rgb,
             target=color_rgb,
             atari_rgb=atari_rgb,
             atari_mask=atari_mask,
-            references=ref_images,
+            references=refs.images,
+            reference_foregrounds=ref_cond.foregrounds,
+            reference_backgrounds=ref_cond.backgrounds,
+            reference_masks=ref_cond.masks,
+            reference_tags=ref_cond.tags,
+            reference_wd_indices=ref_cond.wd_indices,
+            reference_wd_scores=ref_cond.wd_scores,
             text=self._caption(record),
-            metadata={"url": record.url, "prompt": record.prompt, "style": record.style, "parquet_path": str(record.parquet_path), "reference_urls": ref_urls, "reference_policy": self.reference_policy, "reference_policy_actual": ref_policy},
+            metadata={"url": record.url, "prompt": record.prompt, "style": record.style, "parquet_path": str(record.parquet_path), "reference_urls": refs.urls, "reference_policy": self.reference_policy, "reference_policy_actual": refs.policy, "reference_tags": ref_cond.tags},
         )
         return self.dropout(condition)
 
@@ -468,23 +728,25 @@ class OpenNijiParquetColorizationDataset(Dataset):
         digest = hashlib.sha256(record.url.encode("utf-8")).hexdigest()
         return Path(f"{digest}.png")
 
-    def _reference_images(self, record: OpenNijiParquetRecord, line_rgb: np.ndarray, color_rgb: np.ndarray) -> tuple[List[np.ndarray], List[str], str]:
+    def _reference_images(self, record: OpenNijiParquetRecord, line_rgb: np.ndarray, color_rgb: np.ndarray) -> ReferenceInputs:
         policy = resolve_reference_policy(self.reference_policy)
         if policy == "none":
-            return [], [], policy
-        if policy == "self":
-            return [self._resize_square(color_rgb)], [record.url], policy
-        if policy == "deformed_self":
-            return [self._resize_square(deform_reference_rgb(color_rgb))], [record.url], policy
-        if policy == "self_deformed":
-            return [
+            return ReferenceInputs(policy=policy)
+        if policy in {"self", "deformed_self", "self_deformed"}:
+            return self_reference_inputs(
+                self.reference_conditioner,
                 self._resize_square(color_rgb),
-                self._resize_square(deform_reference_rgb(color_rgb)),
-            ], [record.url, record.url], policy
+                record.url,
+                policy,
+                self._resize_square,
+                self.reference_deform_strength,
+                self.reference_background_source,
+                lambda: self._random_other_rgb(record),
+            )
 
         siblings = [item for item in self.groups.get(record.group_key, []) if item != record]
         if not siblings:
-            return [], [], policy
+            return ReferenceInputs(policy=policy)
         np.random.shuffle(siblings)
         refs = []
         ref_urls = []
@@ -497,10 +759,22 @@ class OpenNijiParquetColorizationDataset(Dataset):
             except Exception:
                 continue
         pack = self.references.pack(line_rgb, refs)
-        return pack.images, ref_urls[: len(pack.images)], policy
+        return ReferenceInputs(pack.images, ref_urls[: len(pack.images)], policy)
 
     def _resize_square(self, img: np.ndarray) -> np.ndarray:
         return cv.resize(img, (self.image_size, self.image_size), interpolation=cv.INTER_AREA)
+
+    def _random_other_rgb(self, record: OpenNijiParquetRecord, attempts: int = 3) -> Optional[np.ndarray]:
+        for _ in range(attempts):
+            other = self.records[np.random.randint(len(self.records))]
+            if other == record:
+                continue
+            try:
+                img = self._decode_image(self._read_record(other)["image"]["bytes"])
+            except Exception:
+                continue
+            return cv.cvtColor(self._resize_square(img), cv.COLOR_BGR2RGB)
+        return None
 
     @staticmethod
     def _caption(record: OpenNijiParquetRecord) -> str:

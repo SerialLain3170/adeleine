@@ -18,7 +18,11 @@ Experimental all-in-one colorization path. The same SketchKeras line art can be 
 - `mode`: `render`, `flat`, or `diverse`
 
 Atari RGB and mask are separate so white hints and missing hints are not
-ambiguous.
+ambiguous. For FLUX training, use `--spatial_hint_mode fused_masked` to pass
+Atari colors overlaid on the same line-art plane, plus the binary mask. Add
+`--spatial_condition_id_mode hint_to_output` to place the fused hint tokens on
+the same positional T-plane as the generated latent while keeping references on
+separate planes. This is the current recommended setting for Atari-focused runs.
 
 ## Current Scope
 
@@ -164,6 +168,64 @@ python -m adeleine_v2.train_flux_klein --reference_policy self_deformed --adapte
 # Same-prompt sibling augmentation/evaluation
 python -m adeleine_v2.train_flux_klein --reference_policy sibling --adapter_check --dry_run
 ```
+
+
+## Reference Foreground/Background Masks
+
+Reference conditioning can be split into foreground and background paths using learned anime foreground masks from SkyTNT/anime-segmentation. This is preferred over GrabCut for training. Generate masks once, then pass the mask cache to training:
+
+```bash
+git clone https://github.com/SkyTNT/anime-segmentation ${ADELEINE_DATA}/external/anime-segmentation
+# Install SkyTNT runtime deps without replacing your existing torch build.
+# Keep torchvision matched to your installed torch/CUDA version.
+python -m pip install pytorch_lightning kornia timm
+
+python -m adeleine_v2.precompute_skytnt_reference_masks \
+  --openniji_repo_id all \
+  --hf_home ${ADELEINE_DATA}/huggingface \
+  --output_dir ${ADELEINE_DATA}/openniji/reference_masks/skytnt_512 \
+  --image_size 512 \
+  --skytnt_repo ${ADELEINE_DATA}/external/anime-segmentation \
+  --device cuda:0
+```
+
+For `reference_policy=deformed_self`, Adeleine segments the original reference image, caches that mask, and applies the same geometric deformation to both the RGB reference and mask. This avoids running SkyTNT on every random deformed reference variant.
+
+Self references are split exactly like user references at inference: `ref_fg` is the masked foreground on white, and `ref_bg` is the inpainted background of the *deformed* reference, so no condition image carries a pixel-aligned copy of the target. Earlier checkpoints were trained with the full image as `ref_fg` and the undeformed target background as `ref_bg`, and learned to paste the reference instead of following the line art. The mask is deformed with the same border mode as the RGB, so foreground reflected in from the image border stays foreground. Soft mask edges (alpha > 0.1) are removed with a small dilation before inpainting, so no foreground halo leaks into `ref_bg`. When SkyTNT finds no character (coverage < 2%, about 16% of OpenNiji), the whole reference is `ref_bg` and there is no `ref_fg`; above 98% coverage it is `ref_fg` only. Without a mask the full reference is passed as `ref`.
+
+- `--reference_deform_strength strong` adds horizontal flips, a larger affine range and an elastic warp to self references.
+- `--reference_background_source other` takes `ref_bg` from a random other record instead of the deformed self reference.
+
+Check reference transfer and copying on the hold-out set with different-image references:
+
+```bash
+python -m adeleine_v2.evaluate_reference_transfer \
+  --lora_dirs ${RUN}/checkpoints/step_010000 ${RUN}/checkpoints/step_030000 \
+  --holdout_manifest ${RUN}/holdout_1000.jsonl \
+  --output_dir ${RUN}/eval_ref_transfer \
+  --reference_conditioning split --reference_condition_mode split \
+  --reference_mask_root ${ADELEINE_DATA}/openniji/reference_masks/skytnt_512
+```
+
+Multi-GPU training uses `torchrun --nproc_per_node N -m adeleine_v2.smoke_train_flux_klein ...`. On this machine NCCL hangs at the first collective unless peer-to-peer is disabled, so launch with `NCCL_P2P_DISABLE=1`.
+
+It writes `summary.tsv` (per checkpoint and case), `per_sample.tsv` and grids. Watch `copy_alarm` and the `copy_*` scores against their `*_baseline` columns for reference copying, and `hint_mae` for hint following.
+
+Recommended reference-aware training flags:
+
+```bash
+--reference_policy deformed_self \
+--reference_conditioning split_tags \
+--reference_condition_mode split \
+--reference_mask_root ${ADELEINE_DATA}/openniji/reference_masks/skytnt_512 \
+--reference_mask_fallback skytnt \
+--skytnt_repo ${ADELEINE_DATA}/external/anime-segmentation \
+--skytnt_device cuda:0 \
+--append_reference_tags \
+--max_condition_images 6
+```
+
+`--reference_mask_fallback skytnt` fills missing masks and writes them into `--reference_mask_root`. For long full-dataset training, precompute masks first and use `--reference_mask_fallback skip` if you want to fail soft instead of doing on-demand segmentation during the training loop.
 
 Additional augmentation ideas worth adding after the pipeline is stable:
 
