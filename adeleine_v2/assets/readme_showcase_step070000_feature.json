@@ -1,0 +1,112 @@
+{
+  "checkpoint": "step_070000",
+  "lora_dir": "/data/shasegawa/adeleine/outputs/flux2_klein_openniji_spatial_ref_split_fixed_strongdeform_fulldata_from_spatial327956_holdout1k_512_ddp2/checkpoints/step_070000",
+  "sample": 33,
+  "ref_samples": [
+    25,
+    1,
+    24,
+    6
+  ],
+  "seed": 770001,
+  "inference_steps": 16,
+  "guidance_scale": 3.0,
+  "text_prompt": "anime girl with vivid violet hair, emerald green eyes, midnight blue dress, gold flower ornaments, clean cel shading",
+  "spatial_hint_mode": "fused_masked",
+  "spatial_condition_id_mode": "hint_to_output",
+  "reference_condition_mode": "split",
+  "variants": [
+    {
+      "name": "line_only",
+      "condition_labels": [
+        "line"
+      ],
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/generated_line_only.png"
+    },
+    {
+      "name": "text",
+      "condition_labels": [
+        "line"
+      ],
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/generated_text.png"
+    },
+    {
+      "name": "dot_atari",
+      "condition_labels": [
+        "line",
+        "spatial_atari",
+        "mask"
+      ],
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/generated_dot_atari.png"
+    },
+    {
+      "name": "line_atari",
+      "condition_labels": [
+        "line",
+        "spatial_atari",
+        "mask"
+      ],
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/generated_line_atari.png"
+    },
+    {
+      "name": "reference_25",
+      "condition_labels": [
+        "line",
+        "ref_fg",
+        "ref_bg"
+      ],
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/generated_reference_25.png"
+    },
+    {
+      "name": "reference_1",
+      "condition_labels": [
+        "line",
+        "ref_fg",
+        "ref_bg"
+      ],
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/generated_reference_1.png"
+    },
+    {
+      "name": "reference_24",
+      "condition_labels": [
+        "line",
+        "ref_fg",
+        "ref_bg"
+      ],
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/generated_reference_24.png"
+    },
+    {
+      "name": "reference_6",
+      "condition_labels": [
+        "line",
+        "ref_fg",
+        "ref_bg"
+      ],
+      "path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/generated_reference_6.png"
+    }
+  ],
+  "background_check": {
+    "reference_sample": 16,
+    "condition_labels": [
+      "line",
+      "ref_fg",
+      "ref_bg"
+    ],
+    "generated_path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/generated_background_reference_16.png",
+    "figure_path": "/data/shasegawa/adeleine/outputs/readme_showcase_step070000_feature_eight_cases_richbg16/readme_reference_background_check_step070000.png",
+    "metrics": {
+      "hint_mae": null,
+      "target_mae": 86.21887969970703,
+      "line_recall": 0.9087186836246385,
+      "edge_precision": 0.9911808132806577,
+      "copy_struct_ref": 0.28411308823466785,
+      "copy_struct_ref_bg": 0.3174064044936526,
+      "copy_struct_baseline": 0.27184235798584994,
+      "copy_struct_bg_baseline": 0.3038302713678677,
+      "copy_edge_ref": 0.5387286005028133,
+      "copy_edge_baseline": 0.5349594149320903,
+      "ref_color_dist": 0.5402321774218514,
+      "copy_alarm": 0.0
+    }
+  }
+}

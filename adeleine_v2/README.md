@@ -1,8 +1,8 @@
 # Adeleine v2
 
-![Adeleine v2 condition showcase](./assets/readme_showcase_step080000_condition_rows.png)
+![Adeleine v2 condition showcase](./assets/readme_showcase_step070000_feature.png)
 
-Experimental all-in-one colorization path. The same SketchKeras line art can be combined with optional text, Atari dot/line hints, or reference images.
+All-in-one FLUX.2 Klein colorization with optional text, Atari dot/line hints, or reference images. The figure uses the step-70k checkpoint with one fixed line art and diffusion seed, including text, dot and line hints, and four unrelated reference palettes.
 
 ## Web Demo
 
