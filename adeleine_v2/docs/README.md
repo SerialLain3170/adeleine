@@ -8,6 +8,7 @@ These documents describe the current FLUX.2 Klein implementation, not the older 
 - [Training methodology](training_methodology.md): dataset construction, task mixture, augmentation, objective, optimization, DDP, and checkpoint semantics.
 - [Validation](validation.md): fixed holdout sampling, different-image reference tests, metrics, and current results.
 - [Takeover runbook](takeover.md): dated live-run state, paths, monitoring, recovery, and next actions.
+- [Future direction](future_direction.md): prioritized engineering and research roadmap with measurable milestone gates.
 
 ## Source-of-truth order
 
