@@ -113,7 +113,8 @@ def postprocess_line(pred: np.ndarray, new_width: int, new_height: int, variant:
 
 
 def iter_folder(input_dir: Path, extension: str) -> Iterator[tuple[str, np.ndarray]]:
-    for path in sorted(input_dir.glob(f"**/*{extension}")):
+    paths = sorted(input_dir.glob(f"**/*{extension}"))
+    for path in tqdm(paths, desc="SketchKeras extraction", unit="image"):
         bgr = cv.imread(str(path), cv.IMREAD_COLOR)
         if bgr is None:
             continue
@@ -131,7 +132,9 @@ def iter_openniji(args: argparse.Namespace) -> Iterator[tuple[str, np.ndarray]]:
         reference_policy="none",
     )
     skipped = 0
-    for record in dataset.records:
+    # Track source records so invalid images also count toward completion.
+    # The generator resumes after inference, so the ETA includes model runtime.
+    for record in tqdm(dataset.records, desc="SketchKeras extraction", unit="image"):
         try:
             row = dataset._read_record(record)
             image_bytes = row.get("image", {}).get("bytes")
@@ -142,7 +145,7 @@ def iter_openniji(args: argparse.Namespace) -> Iterator[tuple[str, np.ndarray]]:
         except Exception as exc:
             skipped += 1
             if skipped <= 10 or skipped % 100 == 0:
-                print({"skipped": skipped, "url": record.url, "error": str(exc)}, flush=True)
+                tqdm.write(str({"skipped": skipped, "url": record.url, "error": str(exc)}))
             continue
         rgb = cv.cvtColor(dataset._resize_square(bgr), cv.COLOR_BGR2RGB)
         digest = hashlib.sha256(record.url.encode("utf-8")).hexdigest()
@@ -154,7 +157,7 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     model = load_model(args.model_path, download=args.download_model, url=args.model_url)
     samples = iter_openniji(args) if args.openniji else iter_folder(args.input_dir, args.extension)
-    for name, rgb in tqdm(samples):
+    for name, rgb in samples:
         out_path = args.output_dir / name
         if out_path.exists():
             continue
