@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adeleine-v2"
+version = "0.1.0"
+description = "FLUX.2 Klein colorization with text, Atari hints, and reference images"
+readme = "README.md"
+# The web server uses cgi, which was removed in Python 3.13.
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "accelerate",
+    "diffusers",
+    "huggingface-hub",
+    "numpy",
+    "opencv-python",
+    "peft",
+    "pillow",
+    "pyarrow",
+    "requests",
+    "safetensors",
+    "torch",
+    "tqdm",
+    "transformers",
+]
+
+[project.optional-dependencies]
+extractors = [
+    "controlnet-aux",
+    "einops",
+    "scikit-image",
+    "scipy",
+    "tensorflow",
+]
+reference = ["onnxruntime"]
+
+[tool.setuptools]
+packages = ["adeleine_v2"]
+package-dir = { adeleine_v2 = "." }

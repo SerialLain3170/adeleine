@@ -67,6 +67,17 @@ The legacy JSONL URL loader remains available with `--openniji_source jsonl`, bu
 
 ## Setup
 
+To use uv, run the following from the `adeleine_v2` directory:
+
+```bash
+uv sync
+uv run python -m adeleine_v2.train_flux_klein --help
+```
+
+Use `uv sync --extra extractors` for the optional line extraction dependencies,
+or `uv sync --extra reference` for ONNX reference conditioning. The project
+supports Python 3.10–3.12 because the web server uses the `cgi` module.
+
 All examples below use `ADELEINE_DATA` for model caches, downloaded datasets, generated line-art caches, checkpoints, and sample outputs. Point it at any writable directory on your machine.
 
 ```bash
